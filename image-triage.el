@@ -281,7 +281,7 @@ things up.)"
   (image-triage--display-image image-triage--file-name t)
   (message "Displaying full version of %s" image-triage--file-name))
 
-(defun image-triage-toggle-mark ()
+(defun image-triage-display-toggle-mark ()
   "Toggle marking the current image in the buffer."
   (interactive nil image-triage-display-mode)
   (let ((parent image-triage--parent-buffer)
@@ -292,6 +292,30 @@ things up.)"
       (switch-to-buffer parent t t)
       (image-triage--goto-file file)
       (image-triage-list-toggle-mark))))
+
+(defun image-triage-display-mark ()
+  "Mark the current image in the parent buffer."
+  (interactive nil image-triage-display-mode)
+  (let ((parent image-triage--parent-buffer)
+	(file image-triage--file-name))
+    (unless (buffer-live-p parent)
+      (user-error "The parent buffer has been killed"))
+    (save-window-excursion
+      (switch-to-buffer parent t t)
+      (image-triage--goto-file file)
+      (image-triage-list-mark))))
+
+(defun image-triage-display-unmark ()
+  "Unmark the current image in the parent buffer."
+  (interactive nil image-triage-display-mode)
+  (let ((parent image-triage--parent-buffer)
+	(file image-triage--file-name))
+    (unless (buffer-live-p parent)
+      (user-error "The parent buffer has been killed"))
+    (save-window-excursion
+      (switch-to-buffer parent t t)
+      (image-triage--goto-file file)
+      (image-triage-list-unmark))))
 
 (defun image-triage--display-image (file &optional inhibit-preview)
   (let ((inhibit-read-only t)
@@ -352,7 +376,9 @@ Otherwise, create a new buffer."
   "n" #'image-triage-display-next
   "p" #'image-triage-display-previous
   "g" #'image-triage-display-full
-  "SPC" #'image-triage-toggle-mark)
+  "SPC" #'image-triage-display-toggle-mark
+  "m" #'image-triage-display-mark
+  "u" #'image-triage-display-unmark)
 
 (define-derived-mode image-triage-display-mode special-mode "Triage Display"
   :interactive nil
