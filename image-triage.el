@@ -115,10 +115,10 @@
       (let ((atts (file-attributes file)))
 	(insert (propertize (nth 0 seps)
 			    'image-triage--file file)
-		(if (member file image-triage--marked-files)
-		    (propertize "*" 'face 'variable-pitch
-				'toggle t)
-		  "")
+		(propertize 
+		 (if (member file image-triage--marked-files)
+		     "*" " ")
+		 'face 'variable-pitch 'toggle t)
 		(nth 1 seps)
 		(propertize
 		 (file-size-human-readable (file-attribute-size atts))
@@ -154,6 +154,8 @@
 (defvar-keymap image-triage-list-mode-map
   "RET" #'image-triage-display-image
   "SPC" #'image-triage-list-toggle-mark
+  "m" #'image-triage-list-mark
+  "u" #'image-triage-list-unmark
   "g" #'image-triage-list-reload
   "s" #'image-triage-list-toggle-sort)
 
@@ -176,7 +178,17 @@
   (image-triage-directory image-triage--file-name))
 
 (defun image-triage-list-toggle-mark ()
-  "Toggle the image under point."
+  "Toggle the mark on the image under point."
+  (interactive nil image-triage-list-mode)
+  (let ((file (image-triage--file-name)))
+    (unless file
+      (user-error "No file under point"))
+    (if (member file image-triage--marked-files)
+	(image-triage-list-unmark)
+      (image-triage-list-mark))))
+
+(defun image-triage-list-mark ()
+  "Set the mark on the image under point."
   (interactive nil image-triage-list-mode)
   (let ((file (image-triage--file-name))
 	(inhibit-read-only t))
@@ -185,17 +197,27 @@
     (save-excursion
       (beginning-of-line)
       (text-property-search-forward 'toggle)
-      (if (member file image-triage--marked-files)
-	  (progn
-	    (setq image-triage--marked-files
-		  (delete file image-triage--marked-files))
-	    (subst-char-in-region (point) (1- (point))
-				  ?* ?\s)
-	    (message "Removed mark from %s" file))
-	(push file image-triage--marked-files)
-	(subst-char-in-region (point) (1- (point))
-			      ?\s ?*)
-	(message "Marked %s" file)))))
+      (setq image-triage--marked-files (delete file image-triage--marked-files))
+      (push file image-triage--marked-files)
+      (subst-char-in-region (point) (1- (point))
+			    ?\s ?*)
+      (message "Marked %s" file))))
+
+(defun image-triage-list-unmark ()
+  "Unset the mark on the image under point."
+  (interactive nil image-triage-list-mode)
+  (let ((file (image-triage--file-name))
+	(inhibit-read-only t))
+    (unless file
+      (user-error "No file under point"))
+    (save-excursion
+      (beginning-of-line)
+      (text-property-search-forward 'toggle)
+      (setq image-triage--marked-files
+	    (delete file image-triage--marked-files))
+      (subst-char-in-region (point) (1- (point))
+			    ?* ?\s)
+      (message "Removed mark from %s" file))))
 
 (defun image-triage-display-image (file)
   "Display the image under point."
@@ -247,7 +269,9 @@
     (rename-buffer (generate-new-buffer-name
 		    (concat (file-name-nondirectory (directory-file-name
 						     next-file))
-			    " Triage")))))
+			    " Triage")))
+    (message "Selected %s image" (if (eq direction 'next)
+				     "next" "previous"))))
 
 (defun image-triage-display-full ()
   "Display the full version of the current image.
