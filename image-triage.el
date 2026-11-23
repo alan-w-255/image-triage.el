@@ -46,7 +46,8 @@
 			 image-triage--data)))
       (erase-buffer)
       (image-triage-list-mode)
-      (setq-local image-triage--data old-data)
+      (setq-local image-triage--data (or old-data image-triage--data)
+		  image-triage--file-name directory)
       (image-triage--insert files)
       (or (and current
 	       (image-triage--goto-file current))
@@ -155,12 +156,10 @@ Otherwise, create a new buffer."
 			       image-triage--file-name))
 			file)
 	    return buffer)
-   (with-current-buffer
-       (generate-new-buffer-name
-	(concat (file-name-nondirectory (directory-file-name file))
-		" Triage"))
-     (setq-local image-triage--file-name file)
-     (current-buffer))))
+   (get-buffer-create
+    (generate-new-buffer-name
+     (concat (file-name-nondirectory (directory-file-name file))
+	     " Triage")))))
 
 (define-derived-mode image-triage-display-mode special-mode "Triage Display"
   :interactive nil
@@ -186,14 +185,14 @@ Otherwise, create a new buffer."
 	    (end (window-end))
 	    (lines 0)
 	    (done nil))
-	(cl-flet ((check
-		    (when-let ((file (get-text-property
-				      (point) 'image-triage--file-name)))
-		      (if-let ((elem (gethash file image-triage--data)))
-			  (image-triage--insert-thumbnail
-			   (plist-get elem 'thumbnail))
-			(image-triage--fetch-thumbnail file buffer next)
-			(setq done t)))))
+	(cl-flet ((check ()
+		    (when-let ((file (image-triage--file-name)))
+		      (unless (get-text-property (point) 'thumbnail)
+			(if-let ((elem (gethash file image-triage--data)))
+			    (image-triage--insert-thumbnail
+			     (plist-get elem 'thumbnail))
+			  (image-triage--fetch-thumbnail file buffer next)
+			  (setq done t))))))
 	(save-excursion
 	  (goto-char start)
 	  (beginning-of-line)
@@ -227,13 +226,16 @@ Otherwise, create a new buffer."
 
 (defun image-triage--insert-thumbnail (data)
   (let ((inhibit-read-only t))
+    (beginning-of-line)
     (insert-image (create-image data nil t
 				:height image-triage-image-height)
 		  (propertize " " 'image-triage--file-name
 			      (get-text-property
-			       (point) 'image-triage--file-name)))))
+			       (point) 'image-triage--file-name)
+			      'thumbnail t))))
 
 (defun image-triage--fetch-thumbnail (file buffer next)
+  (message "Fetching thumb for %s" file)
   (when (buffer-live-p buffer)
     (if (not (file-exists-p file))
 	(funcall next)
@@ -268,11 +270,38 @@ Otherwise, create a new buffer."
 		 (with-current-buffer buffer
 		   (setf (gethash file image-triage--data)
 			 (list 'exif data))))
-	       (if-let ((thumbnail (plist-get data 'thumbnail)))
-		   (image-triage--fetch-thumbnail-from-exif
-		    file buffer next thumbnail)
-		 (image-triage--fetch-thumbnail-from-file
-		  file buffer next))))))))))
+	       (image-triage--fetch-thumbnail-from-exif
+		file buffer next (plist-get data 'thumbnail))))))))))
+
+(defun image-triage--fetch-thumbnail-from-exif (file buffer next thumbnail-name)
+  (with-current-buffer (generate-new-buffer " *exif thumbnail*")
+    (set-buffer-multibyte nil)
+    (make-process
+     :name "exiftool"
+     :buffer (current-buffer)
+     :command (if thumbnail-name
+		  (list "exiftool" "-b" (concat "-" thumbnail-name) file)
+		;; If we don't have a thumbnail, then extract from the
+		;; file itself.
+		(list "convert" "-resize"
+		      (format "x%d" image-triage-image-height)
+		      file "jpg:-"))
+     :sentinel
+     (lambda (proc _)
+       (let ((thumbnail
+	      (with-current-buffer (process-buffer proc)
+		(prog1
+		    (buffer-string)
+		  (kill-buffer (current-buffer))))))
+	 (when (buffer-live-p buffer)
+	   (with-current-buffer buffer
+	     (save-excursion
+	       (let ((elem (gethash file image-triage--data)))
+		 (setf (gethash file image-triage--data)
+		       (plist-put elem 'thumbnail thumbnail)))
+	       (when (image-triage--goto-file file)
+		 (image-triage--insert-thumbnail thumbnail))
+	       (funcall next)))))))))
 
 ;; "(Binary data 10499 bytes, use -b option to extract)"
 (defun image-triage--exif-bytes (string)
