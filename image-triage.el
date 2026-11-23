@@ -25,7 +25,7 @@
 (defvar image-triage-file-name-regexps image-type-file-name-regexps
   "Alist of regexps for matching image file names.")
 
-(defvar image-triage-image-height 60
+(defvar image-triage-image-height 80
   "The height (in pixels) of image thumbnails.")
 (defvar image-triage--data)
 (defvar image-triage--file-name)
@@ -106,7 +106,7 @@
 		(nth 2 seps)
 		(propertize (file-name-nondirectory file) 'face 'variable-pitch)
 		(propertize "\n" 'line-height
-			    (+ image-triage-image-height 10)))))))
+			    (+ image-triage-image-height 8)))))))
 
 (defun image-triage--goto-file (file)
   (let ((point (point)))
@@ -254,9 +254,9 @@ Otherwise, create a new buffer."
 			 :height image-triage-image-height
 			 :scale 1
 			 :ascent 100)
-	   (propertize " " 'image-triage--file-name
+	   (propertize " " 'image-triage--file
 		       (get-text-property
-			(point) 'image-triage--file-name)
+			(point) 'image-triage--file)
 		       'thumbnail t))
 	(error nil)))))
 
