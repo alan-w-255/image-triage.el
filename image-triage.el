@@ -247,22 +247,6 @@ Otherwise, create a new buffer."
     (cond
      ((not (file-exists-p file))
       (funcall next))
-     ((executable-find "exiv2")
-      (make-process
-       :name "exiv2"
-       :buffer (generate-new-buffer " *exiv2*")
-       :command (list "exiv2" "-pp" file)
-       :sentinel
-       (lambda (proc _)
-	 (with-current-buffer (process-buffer proc)
-	   (goto-char (point-min))
-	   (let ((id nil))
-	     (when (re-search-forward "^Preview \\([0-9]\\)" nil t)
-	       (setq id (match-string 1)))
-	     (kill-buffer (current-buffer))
-	     (when id
-	       (image-triage--fetch-thumbnail-from-exif
-		file buffer next id t)))))))
      (t
       (make-process
        :name "exiftool"
@@ -307,8 +291,6 @@ Otherwise, create a new buffer."
      :name "exiftool"
      :buffer (current-buffer)
      :command (cond
-	       (exiv
-		(list "exiv2" (concat "-ep" thumbnail-name) file))
 	       (thumbnail-name
 		(list "exiftool" "-b" (concat "-" thumbnail-name) file))
 	       (t
