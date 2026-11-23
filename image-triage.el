@@ -41,15 +41,18 @@
     (switch-to-buffer (image-triage--create-buffer directory))
     (let ((inhibit-read-only t)
 	  (current (image-triage--file-name))
-	  (point (point)))
+	  (point (point))
+	  (old-data (and (boundp 'image-triage--data)
+			 image-triage--data)))
       (erase-buffer)
       (image-triage-list-mode)
-      (setq-local image-triage--file-name directory)
+      (setq-local image-triage--data old-data)
       (image-triage--insert files)
       (or (and current
 	       (image-triage--goto-file current))
 	  (goto-char point))
-      (beginning-of-line))))
+      (beginning-of-line)
+      (image-triage--fill-thumbnails))))
 
 (defun image-triage--insert (files)
   (let* ((twidth (* image-triage-image-height 3))
@@ -111,7 +114,9 @@
   (get-text-property (pos-bol) 'image-triage--file))
 
 (defvar-keymap image-triage-list-mode-map
-  "RET" #'image-triage-display-image)
+  "RET" #'image-triage-display-image
+  "s" #'image-triage-toggle-sort
+  )
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
   :interactive nil
@@ -141,6 +146,8 @@
       (goto-char (point-min)))))
 
 (defun image-triage--create-buffer (file)
+  "If a buffer for FILE exists, return it.
+Otherwise, create a new buffer."
   (or
    (cl-loop for buffer in (buffer-list)
 	    when (equal (with-current-buffer buffer
@@ -148,15 +155,130 @@
 			       image-triage--file-name))
 			file)
 	    return buffer)
-   (generate-new-buffer-name
-    (concat (file-name-nondirectory (directory-file-name file))
-	    " Triage"))))
+   (with-current-buffer
+       (generate-new-buffer-name
+	(concat (file-name-nondirectory (directory-file-name file))
+		" Triage"))
+     (setq-local image-triage--file-name file)
+     (current-buffer))))
 
 (define-derived-mode image-triage-display-mode special-mode "Triage Display"
   :interactive nil
   (setq cursor-type nil
 	truncate-lines t))
-  
+
+(defun image-triage--fill-thumbnails ()
+  ;; We want to fill thumbnails on files that's displayed in the
+  ;; window, and then the next window-ful, and then the previous
+  ;; window-ful.
+  (let ((buffer (current-buffer))
+	function)
+    (setq function
+	  (lambda ()
+	    (image-triage--fill-thumbnails-1 buffer function)))
+    (funcall function)))
+
+(defun image-triage--fill-thumbnails-1 (buffer next)
+  ;; Only do something if the buffer is visible.
+  (when-let ((window (get-buffer-window buffer t)))
+    (with-current-buffer buffer
+      (let ((start (window-start window))
+	    (end (window-end))
+	    (lines 0)
+	    (done nil))
+	(cl-flet ((check
+		    (when-let ((file (get-text-property
+				      (point) 'image-triage--file-name)))
+		      (if-let ((elem (gethash file image-triage--data)))
+			  (image-triage--insert-thumbnail
+			   (plist-get elem 'thumbnail))
+			(image-triage--fetch-thumbnail file buffer next)
+			(setq done t)))))
+	(save-excursion
+	  (goto-char start)
+	  (beginning-of-line)
+	  ;; Do the displayed lines.
+	  (while (and (< (point) end)
+		      (not done))
+	    (check)
+	    (forward-line 1)
+	    (cl-incf lines))
+	  ;; Do the next screen and a half.
+	  (setq lines (truncate (* lines 1.5)))
+	  (unless done
+	    (let ((checked-lines 0))
+	      (while (and (< lines checked-lines)
+			  (not done)
+			  (not (eobp)))
+		(check)
+		(forward-line 1)
+		(cl-incf checked-lines))))
+	  ;; Do the previous screen and a half.
+	  (unless done
+	    (goto-char start)
+	    (let ((checked-lines 0))
+	      (while (and (< lines checked-lines)
+			  (not done))
+		(check)
+		(if (bobp)
+		    (setq done t)
+		  (forward-line -1))
+		(cl-incf checked-lines))))))))))
+
+(defun image-triage--insert-thumbnail (data)
+  (let ((inhibit-read-only t))
+    (insert-image (create-image data nil t
+				:height image-triage-image-height)
+		  (propertize " " 'image-triage--file-name
+			      (get-text-property
+			       (point) 'image-triage--file-name)))))
+
+(defun image-triage--fetch-thumbnail (file buffer next)
+  (when (buffer-live-p buffer)
+    (if (not (file-exists-p file))
+	(funcall next)
+      (make-process
+       :name "exiftool"
+       :buffer (generate-new-buffer " *exiftool*")
+       :command (list "exiftool" "-json" "-a" "-G1" "-s"
+		      "-preview:all" file)
+       :sentinel
+       (lambda (proc _)
+	 (with-current-buffer (process-buffer proc)
+	   (let ((data nil))
+	     (goto-char (point-min))
+	     (unwind-protect
+		 (let ((json (elt (json-parse-buffer :object-type 'plist) 0))
+		       (case-fold-search t))
+		   (cl-loop for (slot value) on json by #'cddr
+			    do (cond
+				((string-match-p "thumbnail" (symbol-name slot))
+				 (push (list 'thumbnail
+					     (symbol-name slot)
+					     (image-triage--exif-bytes value))
+				       data))
+				((string-match-p "preview" (symbol-name slot))
+				 (push (list 'preview
+					     (symbol-name slot)
+					     (image-triage--exif-bytes value))
+				       data)))))
+	       (kill-buffer (current-buffer)))
+	     (when (buffer-live-p buffer)
+	       (when data
+		 (with-current-buffer buffer
+		   (setf (gethash file image-triage--data)
+			 (list 'exif data))))
+	       (if-let ((thumbnail (plist-get data 'thumbnail)))
+		   (image-triage--fetch-thumbnail-from-exif
+		    file buffer next thumbnail)
+		 (image-triage--fetch-thumbnail-from-file
+		  file buffer next))))))))))
+
+;; "(Binary data 10499 bytes, use -b option to extract)"
+(defun image-triage--exif-bytes (string)
+  (and (string-match " \\([0-9]+\\) bytes" string)
+       (string-to-number (match-string 1 string))))
+
 (provide 'image-triage)
 
 ;;; image-triage.el ends here
