@@ -30,6 +30,7 @@
 (defvar image-triage--data)
 (defvar image-triage--file-name)
 (defvar image-triage--last-process)
+(defvar image-triage--parent-buffer)
 
 (defun image-triage-directory (directory)
   (interactive "DView directory: ")
@@ -122,14 +123,12 @@
 
 (defvar-keymap image-triage-list-mode-map
   "RET" #'image-triage-display-image
-  "s" #'image-triage-toggle-sort
-  )
+  "s" #'image-triage-toggle-sort )
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
   :interactive nil
   (setq truncate-lines t)
-  (setq-local image-triage--data (make-hash-table :test #'equal))
-  )
+  (setq-local image-triage--data (make-hash-table :test #'equal)) )
 
 (defun image-triage-display-image (file)
   "Display the image under point."
@@ -138,19 +137,76 @@
     (user-error "No file under point"))
   (unless (file-exists-p file)
     (user-error "File %s does not exist file"))
-  (let ((elem (gethash file image-triage--data)))
+  (let ((parent (current-buffer)))
     (switch-to-buffer (image-triage--create-buffer file))
     (image-triage-display-mode)
-    (let ((inhibit-read-only t)
-	  (idata (plist-get elem 'display)))
-      (erase-buffer)
-      (insert (propertize
-	       " " 'display
-	       (create-image
-		(if idata idata file) nil idata
-		:max-width (truncate (* (frame-pixel-width) 0.9))
-		:max-height (truncate (* (frame-pixel-height) 0.9)))))
-      (goto-char (point-min)))))
+    (setq-local image-triage--file-name file
+		image-triage--parent-buffer parent)
+    (image-triage--display-image file)))
+
+(defun image-triage-display-next ()
+  "View the next image in the buffer."
+  (interactive nil image-triage-display-mode)
+  (let ((parent image-triage--parent-buffer)
+	(file image-triage--file-name)
+	next-file)
+    (unless (buffer-live-p parent)
+      (user-error "The parent buffer has been killed"))
+    (with-current-buffer parent
+      (image-triage--goto-file file)
+      (let ((point (point)))
+	(forward-line 1)
+	(setq next-file (image-triage--file-name))
+	(unless next-file
+	  (goto-char point)
+	  (user-error "No next file"))))
+    (image-triage--display-image next-file)
+    (setq image-triage--file-name next-file
+	  default-directory (file-name-directory next-file))
+    (rename-buffer (generate-new-buffer-name
+		    (concat (file-name-nondirectory (directory-file-name
+						     next-file))
+			    " Triage")))))
+
+(defun image-triage--display-image (file)
+  (let ((inhibit-read-only t)
+	(idata (image-triage--preview file)))
+    (when (zerop (length idata))
+      (setq idata nil))
+    (erase-buffer)
+    (insert (propertize
+	     " " 'display
+	     (create-image
+	      (if idata idata file) nil idata
+	      :width (truncate (* (frame-pixel-width) 0.95))
+	      :max-height (truncate (* (frame-pixel-height) 0.9))
+	      :scale 1)))
+    (goto-char (point-min))))
+
+(defun image-triage--preview (file)
+  (let ((fast (expand-file-name "jpgpreview"
+				(file-name-directory
+				 (find-library-name "image-triage.el")))))
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (cond
+       ((file-exists-p fast)
+	(call-process fast nil t nil "preview" file))
+       (t
+	(call-process "exiftool" nil t nil
+		      "-json" "-a" "-G1" "-s"
+		      "-preview:all" file)
+	(goto-char (point-min))
+	(let* ((json (elt (json-parse-buffer :object-type 'plist) 0))
+	       (case-fold-search t)
+	       (preview-name
+		(cl-loop for (slot _value) on json by #'cddr
+			 when (string-match-p "preview" (symbol-name slot))
+			 return (substring (symbol-name slot) 1))))
+	  (erase-buffer)
+	  (call-process "exiftool" nil t nil
+			"-b" (concat "-" preview-name) file))))
+      (buffer-string))))
 
 (defun image-triage--create-buffer (file)
   "If a buffer for FILE exists, return it.
@@ -166,6 +222,12 @@ Otherwise, create a new buffer."
     (generate-new-buffer-name
      (concat (file-name-nondirectory (directory-file-name file))
 	     " Triage")))))
+
+(defvar-keymap image-triage-display-mode-map
+  "n" #'image-triage-display-next
+  "p" #'image-triage-display-previous
+  "g" #'image-triage-display-full
+  "SPC" #'image-triage-toggle-mark)
 
 (define-derived-mode image-triage-display-mode special-mode "Triage Display"
   :interactive nil
