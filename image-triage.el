@@ -29,6 +29,7 @@
   "The height (in pixels) of image thumbnails.")
 (defvar image-triage--data)
 (defvar image-triage--file-name)
+(defvar image-triage--last-process)
 
 (defun image-triage-directory (directory)
   (interactive "DView directory: ")
@@ -47,7 +48,10 @@
       (erase-buffer)
       (image-triage-list-mode)
       (setq-local image-triage--data (or old-data image-triage--data)
-		  image-triage--file-name directory)
+		  image-triage--file-name directory
+		  image-triage--last-process nil)
+      (add-hook 'window-scroll-functions #'image-triage--window-update
+		nil t)
       (image-triage--insert files)
       (or (and current
 	       (image-triage--goto-file current))
@@ -167,16 +171,30 @@ Otherwise, create a new buffer."
   (setq cursor-type nil
 	truncate-lines t))
 
+(defun image-triage--window-update (_ _)
+  (image-triage--fill-thumbnails))
+
 (defun image-triage--fill-thumbnails ()
-  ;; We want to fill thumbnails on files that's displayed in the
-  ;; window, and then the next window-ful, and then the previous
-  ;; window-ful.
-  (let ((buffer (current-buffer))
-	function)
-    (setq function
-	  (lambda ()
-	    (image-triage--fill-thumbnails-1 buffer function)))
-    (funcall function)))
+  (when image-triage--last-process
+    (message "Time since: %s %s" (time-since image-triage--last-process)
+	     (time-less-p
+	     '(0 0 100000 0)
+	     (time-since image-triage--last-process))))
+  (when (or (null image-triage--last-process)
+	    ;; More than half a second since the last time, so it's
+	    ;; probably done.
+	    (time-less-p
+	     '(0 0 100000 0)
+	     (time-since image-triage--last-process)))
+    ;; We want to fill thumbnails on files that's displayed in the
+    ;; window, and then the next window-ful, and then the previous
+    ;; window-ful.
+    (let ((buffer (current-buffer))
+	  function)
+      (setq function
+	    (lambda ()
+	      (image-triage--fill-thumbnails-1 buffer function)))
+      (funcall function))))
 
 (defun image-triage--fill-thumbnails-1 (buffer next)
   ;; Only do something if the buffer is visible.
@@ -245,7 +263,7 @@ Otherwise, create a new buffer."
 	(error (message "Unable to insert"))))))
 
 (defun image-triage--fetch-thumbnail (file buffer next)
-  (message "Fetching thumb for %s" file)
+  ;;(message "Fetching thumb for %s" file)
   (when (buffer-live-p buffer)
     (let ((fast (expand-file-name "jpgpreview"
 				  (file-name-directory
@@ -258,6 +276,8 @@ Otherwise, create a new buffer."
 	(image-triage--fetch-thumbnail-from-exif
 	 file buffer next "thumb" fast))
        (t
+	(with-current-buffer buffer
+	  (setq image-triage--last-process (current-time)))
 	(make-process
 	 :name "exiftool"
 	 :buffer (generate-new-buffer " *exiftool*")
@@ -297,6 +317,8 @@ Otherwise, create a new buffer."
 						     &optional fast)
   (with-current-buffer (generate-new-buffer " *exif thumbnail*")
     (set-buffer-multibyte nil)
+    (with-current-buffer buffer
+      (setq image-triage--last-process (current-time)))
     (make-process
      :name "exiftool"
      :buffer (current-buffer)
