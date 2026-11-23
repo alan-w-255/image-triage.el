@@ -226,71 +226,83 @@ Otherwise, create a new buffer."
 		  (forward-line -1))
 		(cl-incf checked-lines))))))))))
 
-(defun image-triage--insert-thumbnail (data)
+(defun image-triage--insert-thumbnail (data &optional dummy)
   (let ((inhibit-read-only t))
     (beginning-of-line)
-    (condition-case ()
-	(insert-image
-	 (create-image data nil t
-		       :height image-triage-image-height
-		       :scale 1
-		       :ascent 100)
-	 (propertize " " 'image-triage--file-name
-		     (get-text-property
-		      (point) 'image-triage--file-name)
-		     'thumbnail t))
-      (error (message "Unable to insert")))))
+    (if dummy
+	;; We have no data, but mark the line.
+	(put-text-property (point) (1+ (point)) 'thumbnail :error)
+      (condition-case ()
+	  (insert-image
+	   (create-image data nil t
+			 :height image-triage-image-height
+			 :scale 1
+			 :ascent 100)
+	   (propertize " " 'image-triage--file-name
+		       (get-text-property
+			(point) 'image-triage--file-name)
+		       'thumbnail t))
+	(error (message "Unable to insert"))))))
 
 (defun image-triage--fetch-thumbnail (file buffer next)
   (message "Fetching thumb for %s" file)
   (when (buffer-live-p buffer)
-    (cond
-     ((not (file-exists-p file))
-      (funcall next))
-     (t
-      (make-process
-       :name "exiftool"
-       :buffer (generate-new-buffer " *exiftool*")
-       :command (list "exiftool" "-json" "-a" "-G1" "-s"
-		      "-preview:all" file)
-       :sentinel
-       (lambda (proc _)
-	 (with-current-buffer (process-buffer proc)
-	   (let ((data nil))
-	     (goto-char (point-min))
-	     (unwind-protect
-		 (let ((json (elt (json-parse-buffer :object-type 'plist) 0))
-		       (case-fold-search t))
-		   (cl-loop for (slot value) on json by #'cddr
-			    do (cond
-				((string-match-p "thumbnail" (symbol-name slot))
-				 (push (list 'thumbnail
-					     (substring (symbol-name slot) 1)
-					     (image-triage--exif-bytes value))
-				       data))
-				((string-match-p "preview" (symbol-name slot))
-				 (push (list 'preview
-					     (substring (symbol-name slot) 1)
-					     (image-triage--exif-bytes value))
-				       data)))))
-	       (kill-buffer (current-buffer)))
-	     (when (buffer-live-p buffer)
-	       (when data
-		 (with-current-buffer buffer
-		   (setf (gethash file image-triage--data)
-			 (list 'exif data))))
-	       (image-triage--fetch-thumbnail-from-exif
-		file buffer next (nth 1 (assq 'thumbnail data))))))))))))
+    (let ((fast (expand-file-name "jpgpreview"
+				  (file-name-directory
+				   (find-library-name "image-triage.el")))))
+		
+      (cond
+       ((not (file-exists-p file))
+	(funcall next))
+       (fast
+	(image-triage--fetch-thumbnail-from-exif
+	 file buffer next "thumb" fast))
+       (t
+	(make-process
+	 :name "exiftool"
+	 :buffer (generate-new-buffer " *exiftool*")
+	 :command (list "exiftool" "-json" "-a" "-G1" "-s"
+			"-preview:all" file)
+	 :sentinel
+	 (lambda (proc _)
+	   (with-current-buffer (process-buffer proc)
+	     (let ((data nil))
+	       (goto-char (point-min))
+	       (unwind-protect
+		   (let ((json (elt (json-parse-buffer :object-type 'plist) 0))
+			 (case-fold-search t))
+		     (cl-loop for (slot value) on json by #'cddr
+			      do (cond
+				  ((string-match-p "thumbnail" (symbol-name slot))
+				   (push (list 'thumbnail
+					       (substring (symbol-name slot) 1)
+					       (image-triage--exif-bytes value))
+					 data))
+				  ((string-match-p "preview" (symbol-name slot))
+				   (push (list 'preview
+					       (substring (symbol-name slot) 1)
+					       (image-triage--exif-bytes value))
+					 data)))))
+		 (kill-buffer (current-buffer)))
+	       (when (buffer-live-p buffer)
+		 (when data
+		   (with-current-buffer buffer
+		     (setf (gethash file image-triage--data)
+			   (list 'exif data))))
+		 (image-triage--fetch-thumbnail-from-exif
+		  file buffer next (nth 1 (assq 'thumbnail data)))))))))))))
 
 (defun image-triage--fetch-thumbnail-from-exif (file buffer next
 						     thumbnail-name
-						     &optional exiv)
+						     &optional fast)
   (with-current-buffer (generate-new-buffer " *exif thumbnail*")
     (set-buffer-multibyte nil)
     (make-process
      :name "exiftool"
      :buffer (current-buffer)
      :command (cond
+	       (fast
+		(list fast thumbnail-name file))
 	       (thumbnail-name
 		(list "exiftool" "-b" (concat "-" thumbnail-name) file))
 	       (t
@@ -313,7 +325,8 @@ Otherwise, create a new buffer."
 		 (setf (gethash file image-triage--data)
 		       (plist-put elem 'thumbnail thumbnail)))
 	       (when (image-triage--goto-file file)
-		 (image-triage--insert-thumbnail thumbnail))
+		 (image-triage--insert-thumbnail
+		  thumbnail (not (zerop (process-exit-status proc)))))
 	       (funcall next)))))))))
 
 ;; "(Binary data 10499 bytes, use -b option to extract)"
