@@ -21,6 +21,8 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'find-func)
+(require 'dired)
 
 (defvar image-triage-file-name-regexps image-type-file-name-regexps
   "Alist of regexps for matching image file names.")
