@@ -195,6 +195,7 @@
   "v" #'image-triage-list-view-in-dired
   "C" #'image-triage-list-copy
   "D" #'image-triage-list-delete
+  "&" #'image-triage-list-start
   "s" #'image-triage-list-toggle-sort)
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
@@ -261,6 +262,18 @@ If none are marked, delete the file under point."
        (cl-incf done))
      files)
     (message "Deleted %s file%s" done (if (= done 1) "" "s"))))
+
+(defun image-triage-list-start (files command)
+  "Open a command with the marked files.
+If none are marked, delete the file under point."
+  (interactive (list (image-triage--current-files)
+		     (read-shell-command "Shell command: "))
+	       image-triage-list-mode)
+  (unless files
+    (user-error "No file under point"))
+  (let ((command (split-string-shell-command command)))
+    (apply #'start-process (car command) nil (append command files))
+    (message "Started %s..." (car command))))
 
 (defun image-triage-list-view-in-dired (file)
   "View FILE in a dired buffer."
