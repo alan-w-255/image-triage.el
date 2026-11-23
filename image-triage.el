@@ -172,14 +172,11 @@ Otherwise, create a new buffer."
 	truncate-lines t))
 
 (defun image-triage--window-update (_ _)
-  (image-triage--fill-thumbnails))
+  ;; `window-end' isn't updated right away, apparently, so postpone
+  ;; this slightly.
+  (run-at-time 0.01 nil #'image-triage--fill-thumbnails))
 
 (defun image-triage--fill-thumbnails ()
-  (when image-triage--last-process
-    (message "Time since: %s %s" (time-since image-triage--last-process)
-	     (time-less-p
-	     '(0 0 100000 0)
-	     (time-since image-triage--last-process))))
   (when (or (null image-triage--last-process)
 	    ;; More than half a second since the last time, so it's
 	    ;; probably done.
@@ -201,7 +198,7 @@ Otherwise, create a new buffer."
   (when-let ((window (get-buffer-window buffer t)))
     (with-current-buffer buffer
       (let ((start (window-start window))
-	    (end (window-end))
+	    (end (window-end window))
 	    (lines 0)
 	    (done nil))
 	(cl-flet ((check ()
