@@ -27,21 +27,28 @@
 
 (defvar image-triage-image-height 80
   "The height (in pixels) of image thumbnails.")
+
+;; Buffer-local variables used to store various things.
 (defvar image-triage--data)
 (defvar image-triage--file-name)
 (defvar image-triage--last-process)
 (defvar image-triage--parent-buffer)
 (defvar image-triage--marked-files)
 (defvar image-triage--sort-mode)
+(defvar image-triage--precomputed-previews)
 
 (defun image-triage-directory (directory)
   "View all images under DIRECTORY."
   (interactive "DView directory: ")
   (let* ((regexp (mapconcat #'car image-triage-file-name-regexps "\\|"))
-	 (files (let ((case-fold-search t))
-		  (seq-filter (lambda (file)
-				(string-match-p regexp file))
-			      (directory-files directory t)))))
+	 (files
+	  (let ((case-fold-search t))
+	    (seq-filter (lambda (file)
+			  (string-match-p regexp file))
+			;; `directory-files' doesn't respect
+			;; `case-fold-search', so we do it the hard
+			;; way.
+			(directory-files directory t)))))
     (image-triage--setup directory files)))
 
 (defun image-triage-tree (directory)
@@ -59,6 +66,8 @@
   (let ((inhibit-read-only t)
 	(current (image-triage--file-name))
 	(point (point))
+	;; If we're refreshing the buffer, then we want to keep the
+	;; data from the old version of the buffer.
 	(old-data (and (boundp 'image-triage--data)
 		       image-triage--data))
 	(old-marked (and (boundp 'image-triage--marked-files)
@@ -72,21 +81,24 @@
 		image-triage--last-process nil
 		image-triage--marked-files old-marked
 		image-triage--sort-mode old-sort)
+    ;; We default to sorting by newest first.
     (unless image-triage--sort-mode
       (setq image-triage--sort-mode 'time))
     (setq default-directory directory)
+    ;; Automatically update when we scroll.
     (add-hook 'window-scroll-functions #'image-triage--window-update
 	      nil t)
     (image-triage--insert
      (if (eq image-triage--sort-mode 'time)
 	 (sort files (lambda (f1 f2)
-		       ;; Sort newest first by default.
+		       ;; Sort newest first.
 		       (time-less-p (file-attribute-modification-time
 				     (file-attributes f2))
 				    (file-attribute-modification-time
 				     (file-attributes f1)))))
        ;; Alphabeticalish.
        (sort files #'string-version-lessp)))
+    ;; When refreshing, try to keep the same position.
     (or (and current
 	     (image-triage--goto-file current))
 	(goto-char point))
@@ -94,6 +106,11 @@
     (image-triage--fill-thumbnails)))
 
 (defun image-triage--insert (files)
+  ;; We do this buffer the hard way -- by precomputing some defaults
+  ;; and then using them throughout.  This is much faster than doing
+  ;; things properly like `vtable' does, but speed is important here
+  ;; -- we want this mode to work for directories/trees with tens of
+  ;; thousands of images.
   (let* ((twidth (* image-triage-image-height 3))
 	 (swidth (string-pixel-width
 		  (propertize "9999G" 'face 'variable-pitch)))
@@ -158,10 +175,12 @@
     (goto-char (point-min))
     (or (text-property-search-forward 'image-triage--file file #'equal)
 	(progn
+	  ;; Restore point.
 	  (goto-char point)
 	  nil))))
 
 (defun image-triage--file-name ()
+  "Return the name of the file on the current line."
   (get-text-property (pos-bol) 'image-triage--file))
 
 (defvar-keymap image-triage-list-mode-map
@@ -178,6 +197,7 @@
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
   :interactive nil
+  (buffer-disable-undo)
   (setq truncate-lines t)
   (setq-local image-triage--data (make-hash-table :test #'equal)) )
 
@@ -190,14 +210,18 @@
   (image-triage-list-reload))
 
 (defun image-triage-list-reload ()
-  "Reload the current list."
+  "Reload the current list of images."
   (interactive nil image-triage-list-mode)
+  ;; FIXME Doesn't work in tree mode.
   (image-triage-directory image-triage--file-name))
 
 (defun image-triage-list-copy (files to-directory)
   "Copy the marked files somewhere.
 If none are marked, copy the file under point."
   (interactive (list (image-triage--current-files)
+		     ;; FIXME: When copying a single file, you should
+		     ;; be able to give it a new name, not just copy
+		     ;; to a directory.
 		     (read-directory-name "Copy to: "))
 	       image-triage-list-mode)
   (unless files
@@ -266,8 +290,8 @@ If none are marked, delete the file under point."
       (text-property-search-forward 'toggle)
       (setq image-triage--marked-files (delete file image-triage--marked-files))
       (push file image-triage--marked-files)
-      (subst-char-in-region (point) (1- (point))
-			    ?\s ?*)
+      ;; We do it like this to preserve text properties.
+      (subst-char-in-region (point) (1- (point)) ?\s ?*)
       (message "Marked %s" file))))
 
 (defun image-triage-list-unmark-all ()
@@ -301,8 +325,7 @@ If none are marked, delete the file under point."
       (text-property-search-forward 'toggle)
       (setq image-triage--marked-files
 	    (delete file image-triage--marked-files))
-      (subst-char-in-region (point) (1- (point))
-			    ?* ?\s)
+      (subst-char-in-region (point) (1- (point)) ?* ?\s)
       (unless silent
 	(message "Removed mark from %s" file)))))
 
@@ -317,7 +340,8 @@ If none are marked, delete the file under point."
     (switch-to-buffer (image-triage--create-buffer file))
     (image-triage-display-mode)
     (setq-local image-triage--file-name file
-		image-triage--parent-buffer parent)
+		image-triage--parent-buffer parent
+		image-triage--precomputed-previews nil)
     (image-triage--display-image file)))
 
 (defun image-triage-display-next ()
@@ -351,6 +375,9 @@ If none are marked, delete the file under point."
 	  (goto-char point)
 	  (user-error "No next file"))))
     (image-triage--display-image next-file)
+    ;; Update the buffer for the new file name.  When hitting `n' in a
+    ;; view buffer, we don't want to create a whole bunch of buffers,
+    ;; one per image, so we reuse a single buffer.
     (setq image-triage--file-name next-file
 	  default-directory (file-name-directory next-file))
     (rename-buffer (generate-new-buffer-name
@@ -375,6 +402,7 @@ things up.)"
 	(file image-triage--file-name))
     (unless (buffer-live-p parent)
       (user-error "The parent buffer has been killed"))
+    ;; Do it this way so that point actually moves in the list buffer.
     (save-window-excursion
       (switch-to-buffer parent t t)
       (image-triage--goto-file file)
@@ -406,7 +434,9 @@ things up.)"
 
 (defun image-triage--display-image (file &optional inhibit-preview)
   (let ((inhibit-read-only t)
-	(idata (and (not inhibit-preview) (image-triage--preview file))))
+	(idata (and (not inhibit-preview)
+		    (or (image-triage--precomputed file)
+			(image-triage--preview file)))))
     (when (zerop (length idata))
       (setq idata nil))
     (erase-buffer)
@@ -417,7 +447,15 @@ things up.)"
 	      :width (truncate (* (frame-pixel-width) 0.95))
 	      :max-height (truncate (* (frame-pixel-height) 0.9))
 	      :scale 1)))
-    (goto-char (point-min))))
+    (goto-char (point-min))
+    (image-triage--preload file image-triage--parent-buffer)))
+
+(defun image-triage--precomputed (file)
+  (cdr (assoc file image-triage--precomputed-previews)))
+
+(defun image-triage--preload (_from-file _parent)
+  ;; FIXME.
+  )
 
 (defun image-triage--preview (file)
   (let ((fast (expand-file-name "jpgpreview"
@@ -448,12 +486,14 @@ things up.)"
   "If a buffer for FILE exists, return it.
 Otherwise, create a new buffer."
   (or
+   ;; Find an old image-triage buffer that displays FILE.
    (cl-loop for buffer in (buffer-list)
 	    when (equal (with-current-buffer buffer
 			  (and (boundp 'image-triage--file-name)
 			       image-triage--file-name))
 			file)
 	    return buffer)
+   ;; Create a new one.
    (get-buffer-create
     (generate-new-buffer-name
      (concat (file-name-nondirectory (directory-file-name file))
@@ -469,6 +509,7 @@ Otherwise, create a new buffer."
 
 (define-derived-mode image-triage-display-mode special-mode "Triage Display"
   :interactive nil
+  (buffer-disable-undo)
   (setq cursor-type nil
 	truncate-lines t))
 
@@ -493,6 +534,11 @@ Otherwise, create a new buffer."
       (setq function
 	    (lambda ()
 	      (image-triage--fill-thumbnails-1 buffer function)))
+      ;; We call the function this awkward way because we're passing
+      ;; the function in to itself.  The function will load one
+      ;; thumbnail (asynchronously), and then at the end, it will call
+      ;; itself to fetch the next one, and so on.  Until we have a
+      ;; sufficient number of thumbnails.
       (funcall function))))
 
 (defun image-triage--fill-thumbnails-1 (buffer next)
@@ -562,19 +608,22 @@ Otherwise, create a new buffer."
 	(error nil)))))
 
 (defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast)
-  ;;(message "Fetching thumb for %s" file)
   (when (buffer-live-p buffer)
     (let ((fast (expand-file-name "jpgpreview"
 				  (file-name-directory
 				   (find-library-name "image-triage.el")))))
 		
       (cond
+       ;; If the file has disappeared in the meantime, just skip to
+       ;; the next.
        ((not (file-exists-p file))
 	(funcall next))
+       ;; Fast utility distributed with `image-triage'.
        ((and (not inhibit-fast)
 	     (file-exists-p fast))
-	(image-triage--fetch-thumbnail-from-exif
-	 file buffer next "thumb" fast))
+	(image-triage--fetch-thumbnail-from-exif file buffer next "thumb" fast))
+       ;; Slow version -- we first see what the thumbnail is called,
+       ;; and then we extract it.
        (t
 	(with-current-buffer buffer
 	  (setq image-triage--last-process (current-time)))
@@ -593,6 +642,8 @@ Otherwise, create a new buffer."
 				      (json-parse-buffer :object-type 'plist))
 				    0))
 			 (case-fold-search t))
+		     ;; Hopefully the thumbnail is called something
+		     ;; like "thumbnail".
 		     (cl-loop for (slot value) on json by #'cddr
 			      do (cond
 				  ((string-match-p
@@ -613,6 +664,8 @@ Otherwise, create a new buffer."
 		   (with-current-buffer buffer
 		     (setf (gethash file image-triage--data)
 			   (list 'exif data))))
+		 ;; We have the name of the thumbnail exif element, so
+		 ;; extract it.
 		 (image-triage--fetch-thumbnail-from-exif
 		  file buffer next (nth 1 (assq 'thumbnail data)))))))))))))
 
