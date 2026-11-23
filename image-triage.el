@@ -31,6 +31,7 @@
 (defvar image-triage--file-name)
 (defvar image-triage--last-process)
 (defvar image-triage--parent-buffer)
+(defvar image-triage--marked-files)
 
 (defun image-triage-directory (directory)
   (interactive "DView directory: ")
@@ -45,12 +46,15 @@
 	  (current (image-triage--file-name))
 	  (point (point))
 	  (old-data (and (boundp 'image-triage--data)
-			 image-triage--data)))
+			 image-triage--data))
+	  (old-marked (and (boundp 'image-triage--marked-files)
+			   image-triage--marked-files)))
       (erase-buffer)
       (image-triage-list-mode)
       (setq-local image-triage--data (or old-data image-triage--data)
 		  image-triage--file-name directory
-		  image-triage--last-process nil)
+		  image-triage--last-process nil
+		  image-triage--marked-files old-marked)
       (setq default-directory directory)
       (add-hook 'window-scroll-functions #'image-triage--window-update
 		nil t)
@@ -65,6 +69,8 @@
   (let* ((twidth (* image-triage-image-height 3))
 	 (swidth (string-pixel-width
 		  (propertize "9999G" 'face 'variable-pitch)))
+	 (mwidth (string-pixel-width
+		  (propertize "*" 'face 'variable-pitch)))
 	 (dwidth (max (string-pixel-width
 		       (propertize "WWW 30 2019" 'face 'variable-pitch))
 		      (string-pixel-width
@@ -73,27 +79,36 @@
 		 (* 60 60 24 300)))
 	 (seps
 	  (list
-	   (propertize " " 'display `(space :align-to (,twidth)))
 	   (propertize " " 'display
-		       `(space :align-to (,(+ twidth 10 swidth))))
-	   (propertize " " 'display `(space :align-to
-					    (,(+ twidth 20 swidth dwidth)))))))
+		       `(space :align-to (,twidth)))
+	   (propertize " " 'display
+		       `(space :align-to (,(+ twidth mwidth 20))))
+	   (propertize " " 'display
+		       `(space :align-to (,(+ twidth mwidth 30 swidth))))
+	   (propertize " " 'display
+		       `(space :align-to (,(+ twidth mwidth 40 swidth dwidth)))))))
     (setq header-line-format
 	  (propertize
 	   (concat
 	    "Thumb" (nth 0 seps)
-	    "Size" (nth 1 seps)
-	    "Date" (nth 2 seps)
+	    "M" (nth 1 seps)
+	    "Size" (nth 2 seps)
+	    "Date" (nth 3 seps)
 	    "File")
 	   'face 'variable-pitch))
     (dolist (file files)
       (let ((atts (file-attributes file)))
 	(insert (propertize (nth 0 seps)
 			    'image-triage--file file)
+		(if (member file image-triage--marked-files)
+		    (propertize "*" 'face 'variable-pitch
+				'toggle t)
+		  "")
+		(nth 1 seps)
 		(propertize
 		 (file-size-human-readable (file-attribute-size atts))
 		 'face 'variable-pitch)
-		(nth 1 seps)
+		(nth 2 seps)
 		(propertize
 		 (if (> (time-convert (file-attribute-modification-time atts)
 				      'integer)
@@ -105,7 +120,7 @@
 		    "%b %d %Y"
 		    (file-attribute-modification-time atts)))
 		 'face 'variable-pitch)
-		(nth 2 seps)
+		(nth 3 seps)
 		(propertize (file-name-nondirectory file) 'face 'variable-pitch)
 		(propertize "\n" 'line-height
 			    (+ image-triage-image-height 8)))))))
@@ -123,12 +138,34 @@
 
 (defvar-keymap image-triage-list-mode-map
   "RET" #'image-triage-display-image
-  "s" #'image-triage-toggle-sort )
+  "SPC" #'image-triage-list-toggle-mark
+  "s" #'image-triage-toggle-sort)
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
   :interactive nil
   (setq truncate-lines t)
   (setq-local image-triage--data (make-hash-table :test #'equal)) )
+
+(defun image-triage-list-toggle-mark (file)
+  "Toggle the image under point."
+  (interactive (list (image-triage--file-name)) image-triage-list-mode)
+  (unless file
+    (user-error "No file under point"))
+  (save-excursion
+    (beginning-of-line)
+    (text-property-search-forward 'toggle)
+    (let ((inhibit-read-only t))
+      (if (member file image-triage--marked-files)
+	  (progn
+	    (setq image-triage--marked-files
+		  (delete file image-triage--marked-files))
+	    (subst-char-in-region (point) (1- (point))
+				  ?* ?\s)
+	    (message "Removed mark from %s" file))
+	(push file image-triage--marked-files)
+	(subst-char-in-region (point) (1- (point))
+			      ?\s ?*)
+	(message "Marked %s" file)))))
 
 (defun image-triage-display-image (file)
   "Display the image under point."
@@ -182,9 +219,29 @@
 						     next-file))
 			    " Triage")))))
 
-(defun image-triage--display-image (file)
+(defun image-triage-display-full ()
+  "Display the full version of the current image.
+(By default, this mode displays downscaled versions to speed
+things up.)"
+  (interactive nil image-triage-display-mode)
+  (image-triage--display-image image-triage--file-name t)
+  (message "Displaying full version of %s" image-triage--file-name))
+
+(defun image-triage-toggle-mark ()
+  "Toggle marking the current image in the buffer."
+  (interactive nil image-triage-display-mode)
+  (let ((parent image-triage--parent-buffer)
+	(file image-triage--file-name))
+    (unless (buffer-live-p parent)
+      (user-error "The parent buffer has been killed"))
+    (save-window-excursion
+      (switch-to-buffer parent t t)
+      (image-triage--goto-file file)
+      (image-triage-list-toggle-mark))))
+
+(defun image-triage--display-image (file &optional inhibit-preview)
   (let ((inhibit-read-only t)
-	(idata (image-triage--preview file)))
+	(idata (and (not inhibit-preview) (image-triage--preview file))))
     (when (zerop (length idata))
       (setq idata nil))
     (erase-buffer)
