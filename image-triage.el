@@ -50,6 +50,7 @@
       (setq-local image-triage--data (or old-data image-triage--data)
 		  image-triage--file-name directory
 		  image-triage--last-process nil)
+      (setq default-directory directory)
       (add-hook 'window-scroll-functions #'image-triage--window-update
 		nil t)
       (image-triage--insert files)
