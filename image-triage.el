@@ -101,7 +101,8 @@
 		 'face 'variable-pitch)
 		(nth 2 seps)
 		(propertize (file-name-nondirectory file) 'face 'variable-pitch)
-		(propertize "\n" 'line-height image-triage-image-height))))))
+		(propertize "\n" 'line-height
+			    (+ image-triage-image-height 10)))))))
 
 (defun image-triage--goto-file (file)
   (let ((point (point)))
@@ -188,11 +189,12 @@ Otherwise, create a new buffer."
 	(cl-flet ((check ()
 		    (when-let ((file (image-triage--file-name)))
 		      (unless (get-text-property (point) 'thumbnail)
-			(if-let ((elem (gethash file image-triage--data)))
-			    (image-triage--insert-thumbnail
-			     (plist-get elem 'thumbnail))
-			  (image-triage--fetch-thumbnail file buffer next)
-			  (setq done t))))))
+			(let ((elem (gethash file image-triage--data)))
+			  (if (plist-get elem 'thumbnail)
+			      (image-triage--insert-thumbnail
+			       (plist-get elem 'thumbnail))
+			    (image-triage--fetch-thumbnail file buffer next)
+			    (setq done t)))))))
 	(save-excursion
 	  (goto-char start)
 	  (beginning-of-line)
@@ -228,7 +230,9 @@ Otherwise, create a new buffer."
   (let ((inhibit-read-only t))
     (beginning-of-line)
     (insert-image (create-image data nil t
-				:height image-triage-image-height)
+				:height image-triage-image-height
+				:scale 1
+				:ascent 100)
 		  (propertize " " 'image-triage--file-name
 			      (get-text-property
 			       (point) 'image-triage--file-name)
@@ -256,12 +260,12 @@ Otherwise, create a new buffer."
 			    do (cond
 				((string-match-p "thumbnail" (symbol-name slot))
 				 (push (list 'thumbnail
-					     (symbol-name slot)
+					     (substring (symbol-name slot) 1)
 					     (image-triage--exif-bytes value))
 				       data))
 				((string-match-p "preview" (symbol-name slot))
 				 (push (list 'preview
-					     (symbol-name slot)
+					     (substring (symbol-name slot) 1)
 					     (image-triage--exif-bytes value))
 				       data)))))
 	       (kill-buffer (current-buffer)))
@@ -271,7 +275,7 @@ Otherwise, create a new buffer."
 		   (setf (gethash file image-triage--data)
 			 (list 'exif data))))
 	       (image-triage--fetch-thumbnail-from-exif
-		file buffer next (plist-get data 'thumbnail))))))))))
+		file buffer next (nth 1 (assq 'thumbnail data)))))))))))
 
 (defun image-triage--fetch-thumbnail-from-exif (file buffer next thumbnail-name)
   (with-current-buffer (generate-new-buffer " *exif thumbnail*")
