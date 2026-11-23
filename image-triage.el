@@ -147,16 +147,30 @@
 (defun image-triage-display-next ()
   "View the next image in the buffer."
   (interactive nil image-triage-display-mode)
+  (image-triage--move 'next))
+
+(defun image-triage-display-previous ()
+  "View the previous image in the buffer."
+  (interactive nil image-triage-display-mode)
+  (image-triage--move 'previous))
+
+(defun image-triage--move (direction)
   (let ((parent image-triage--parent-buffer)
 	(file image-triage--file-name)
 	next-file)
     (unless (buffer-live-p parent)
       (user-error "The parent buffer has been killed"))
-    (with-current-buffer parent
+    (save-window-excursion
+      (switch-to-buffer parent t t)
       (image-triage--goto-file file)
       (let ((point (point)))
-	(forward-line 1)
-	(setq next-file (image-triage--file-name))
+	(if (equal direction 'next)
+	    (progn
+	      (forward-line 1)
+	      (setq next-file (image-triage--file-name)))
+	  (unless (bobp)
+	    (forward-line -1)
+	    (setq next-file (image-triage--file-name))))
 	(unless next-file
 	  (goto-char point)
 	  (user-error "No next file"))))
