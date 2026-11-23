@@ -171,6 +171,7 @@
   "U" #'image-triage-list-unmark-all
   "u" #'image-triage-list-unmark
   "g" #'image-triage-list-reload
+  "v" #'image-triage-list-view-in-dired
   "C" #'image-triage-list-copy
   "D" #'image-triage-list-delete
   "s" #'image-triage-list-toggle-sort)
@@ -234,6 +235,14 @@ If none are marked, delete the file under point."
        (cl-incf done))
      files)
     (message "Deleted %s file%s" done (if (= done 1) "" "s"))))
+
+(defun image-triage-list-view-in-dired (file)
+  "View FILE in a dired buffer."
+  (interactive (list (image-triage--file-name)) image-triage-list-mode)
+  (unless file
+    (user-error "No file under point"))
+  (find-file (file-name-directory file))
+  (dired-goto-file file))
 
 (defun image-triage-list-toggle-mark ()
   "Toggle the mark on the image under point."
