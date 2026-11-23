@@ -177,12 +177,13 @@ Otherwise, create a new buffer."
   (run-at-time 0.01 nil #'image-triage--fill-thumbnails))
 
 (defun image-triage--fill-thumbnails ()
-  (when (or (null image-triage--last-process)
-	    ;; More than half a second since the last time, so it's
-	    ;; probably done.
-	    (time-less-p
-	     '(0 0 100000 0)
-	     (time-since image-triage--last-process)))
+  (when (and (boundp 'image-triage--last-process)
+	     (or (null image-triage--last-process)
+		 ;; More than half a second since the last time, so it's
+		 ;; probably done.
+		 (time-less-p
+		  '(0 0 100000 0)
+		  (time-since image-triage--last-process))))
     ;; We want to fill thumbnails on files that's displayed in the
     ;; window, and then the next window-ful, and then the previous
     ;; window-ful.
@@ -257,9 +258,9 @@ Otherwise, create a new buffer."
 		       (get-text-property
 			(point) 'image-triage--file-name)
 		       'thumbnail t))
-	(error (message "Unable to insert"))))))
+	(error nil)))))
 
-(defun image-triage--fetch-thumbnail (file buffer next)
+(defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast)
   ;;(message "Fetching thumb for %s" file)
   (when (buffer-live-p buffer)
     (let ((fast (expand-file-name "jpgpreview"
@@ -269,7 +270,8 @@ Otherwise, create a new buffer."
       (cond
        ((not (file-exists-p file))
 	(funcall next))
-       (fast
+       ((and (not inhibit-fast)
+	     (file-exists-p fast))
 	(image-triage--fetch-thumbnail-from-exif
 	 file buffer next "thumb" fast))
        (t
@@ -332,21 +334,27 @@ Otherwise, create a new buffer."
 		      file "jpg:-")))
      :sentinel
      (lambda (proc _)
-       (let ((thumbnail
-	      (with-current-buffer (process-buffer proc)
-		(prog1
-		    (buffer-string)
-		  (kill-buffer (current-buffer))))))
-	 (when (buffer-live-p buffer)
-	   (with-current-buffer buffer
-	     (save-excursion
-	       (let ((elem (gethash file image-triage--data)))
-		 (setf (gethash file image-triage--data)
-		       (plist-put elem 'thumbnail thumbnail)))
-	       (when (image-triage--goto-file file)
-		 (image-triage--insert-thumbnail
-		  thumbnail (not (zerop (process-exit-status proc)))))
-	       (funcall next)))))))))
+       (if (and fast
+		(not (zerop (process-exit-status proc))))
+	   ;; If we used the fast version, we may not have gotten
+	   ;; a thumbnail (because there wasn't one).  If so,
+	   ;; go back and do it that hard way.
+	   (image-triage--fetch-thumbnail file buffer next t)
+	 (let ((thumbnail
+		(with-current-buffer (process-buffer proc)
+		  (prog1
+		      (buffer-string)
+		    (kill-buffer (current-buffer))))))
+	   (when (buffer-live-p buffer)
+	     (with-current-buffer buffer
+	       (save-excursion
+		 (let ((elem (gethash file image-triage--data)))
+		   (setf (gethash file image-triage--data)
+			 (plist-put elem 'thumbnail thumbnail)))
+		 (when (image-triage--goto-file file)
+		   (image-triage--insert-thumbnail
+		    thumbnail (not (zerop (process-exit-status proc)))))
+		 (funcall next))))))))))
 
 ;; "(Binary data 10499 bytes, use -b option to extract)"
 (defun image-triage--exif-bytes (string)
