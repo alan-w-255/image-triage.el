@@ -208,7 +208,7 @@ Otherwise, create a new buffer."
 	  (setq lines (truncate (* lines 1.5)))
 	  (unless done
 	    (let ((checked-lines 0))
-	      (while (and (< lines checked-lines)
+	      (while (and (< checked-lines lines)
 			  (not done)
 			  (not (eobp)))
 		(check)
@@ -218,7 +218,7 @@ Otherwise, create a new buffer."
 	  (unless done
 	    (goto-char start)
 	    (let ((checked-lines 0))
-	      (while (and (< lines checked-lines)
+	      (while (and (< checked-lines lines)
 			  (not done))
 		(check)
 		(if (bobp)
@@ -229,20 +229,41 @@ Otherwise, create a new buffer."
 (defun image-triage--insert-thumbnail (data)
   (let ((inhibit-read-only t))
     (beginning-of-line)
-    (insert-image (create-image data nil t
-				:height image-triage-image-height
-				:scale 1
-				:ascent 100)
-		  (propertize " " 'image-triage--file-name
-			      (get-text-property
-			       (point) 'image-triage--file-name)
-			      'thumbnail t))))
+    (condition-case ()
+	(insert-image
+	 (create-image data nil t
+		       :height image-triage-image-height
+		       :scale 1
+		       :ascent 100)
+	 (propertize " " 'image-triage--file-name
+		     (get-text-property
+		      (point) 'image-triage--file-name)
+		     'thumbnail t))
+      (error (message "Unable to insert")))))
 
 (defun image-triage--fetch-thumbnail (file buffer next)
   (message "Fetching thumb for %s" file)
   (when (buffer-live-p buffer)
-    (if (not (file-exists-p file))
-	(funcall next)
+    (cond
+     ((not (file-exists-p file))
+      (funcall next))
+     ((executable-find "exiv2")
+      (make-process
+       :name "exiv2"
+       :buffer (generate-new-buffer " *exiv2*")
+       :command (list "exiv2" "-pp" file)
+       :sentinel
+       (lambda (proc _)
+	 (with-current-buffer (process-buffer proc)
+	   (goto-char (point-min))
+	   (let ((id nil))
+	     (when (re-search-forward "^Preview \\([0-9]\\)" nil t)
+	       (setq id (match-string 1)))
+	     (kill-buffer (current-buffer))
+	     (when id
+	       (image-triage--fetch-thumbnail-from-exif
+		file buffer next id t)))))))
+     (t
       (make-process
        :name "exiftool"
        :buffer (generate-new-buffer " *exiftool*")
@@ -275,21 +296,27 @@ Otherwise, create a new buffer."
 		   (setf (gethash file image-triage--data)
 			 (list 'exif data))))
 	       (image-triage--fetch-thumbnail-from-exif
-		file buffer next (nth 1 (assq 'thumbnail data)))))))))))
+		file buffer next (nth 1 (assq 'thumbnail data))))))))))))
 
-(defun image-triage--fetch-thumbnail-from-exif (file buffer next thumbnail-name)
+(defun image-triage--fetch-thumbnail-from-exif (file buffer next
+						     thumbnail-name
+						     &optional exiv)
   (with-current-buffer (generate-new-buffer " *exif thumbnail*")
     (set-buffer-multibyte nil)
     (make-process
      :name "exiftool"
      :buffer (current-buffer)
-     :command (if thumbnail-name
-		  (list "exiftool" "-b" (concat "-" thumbnail-name) file)
+     :command (cond
+	       (exiv
+		(list "exiv2" (concat "-ep" thumbnail-name) file))
+	       (thumbnail-name
+		(list "exiftool" "-b" (concat "-" thumbnail-name) file))
+	       (t
 		;; If we don't have a thumbnail, then extract from the
 		;; file itself.
 		(list "convert" "-resize"
 		      (format "x%d" image-triage-image-height)
-		      file "jpg:-"))
+		      file "jpg:-")))
      :sentinel
      (lambda (proc _)
        (let ((thumbnail
