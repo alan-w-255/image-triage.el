@@ -35,50 +35,63 @@
 (defvar image-triage--sort-mode)
 
 (defun image-triage-directory (directory)
+  "View all images under DIRECTORY."
   (interactive "DView directory: ")
   (let* ((regexp (mapconcat #'car image-triage-file-name-regexps "\\|"))
 	 (files (let ((case-fold-search t))
 		  (seq-filter (lambda (file)
 				(string-match-p regexp file))
 			      (directory-files directory t)))))
-    (setq directory (expand-file-name directory))
-    (switch-to-buffer (image-triage--create-buffer directory))
-    (let ((inhibit-read-only t)
-	  (current (image-triage--file-name))
-	  (point (point))
-	  (old-data (and (boundp 'image-triage--data)
-			 image-triage--data))
-	  (old-marked (and (boundp 'image-triage--marked-files)
-			   image-triage--marked-files))
-	  (old-sort (and (boundp 'image-triage--sort-mode)
-			 image-triage--sort-mode)))
-      (erase-buffer)
-      (image-triage-list-mode)
-      (setq-local image-triage--data (or old-data image-triage--data)
-		  image-triage--file-name directory
-		  image-triage--last-process nil
-		  image-triage--marked-files old-marked
-		  image-triage--sort-mode old-sort)
-      (unless image-triage--sort-mode
-	(setq image-triage--sort-mode 'time))
-      (setq default-directory directory)
-      (add-hook 'window-scroll-functions #'image-triage--window-update
-		nil t)
-      (image-triage--insert
-       (if (eq image-triage--sort-mode 'time)
-	   (sort files (lambda (f1 f2)
-			 ;; Sort newest first by default.
-			 (time-less-p (file-attribute-modification-time
-				       (file-attributes f2))
-				      (file-attribute-modification-time
-				       (file-attributes f1)))))
-	 ;; Alphabeticalish.
-	 (sort files #'string-version-lessp)))
-      (or (and current
-	       (image-triage--goto-file current))
-	  (goto-char point))
-      (beginning-of-line)
-      (image-triage--fill-thumbnails))))
+    (image-triage--setup directory files)))
+
+(defun image-triage-tree (directory)
+  "View all images under DIRECTORY, recursively."
+  (interactive "DView all images under directory: ")
+  (let ((files (let ((case-fold-search t))
+		 (directory-files-recursively
+		  (expand-file-name directory)
+		  (mapconcat #'car image-triage-file-name-regexps "\\|")))))
+    (image-triage--setup directory files)))
+
+(defun image-triage--setup (directory files)
+  (setq directory (expand-file-name directory))
+  (switch-to-buffer (image-triage--create-buffer directory))
+  (let ((inhibit-read-only t)
+	(current (image-triage--file-name))
+	(point (point))
+	(old-data (and (boundp 'image-triage--data)
+		       image-triage--data))
+	(old-marked (and (boundp 'image-triage--marked-files)
+			 image-triage--marked-files))
+	(old-sort (and (boundp 'image-triage--sort-mode)
+		       image-triage--sort-mode)))
+    (erase-buffer)
+    (image-triage-list-mode)
+    (setq-local image-triage--data (or old-data image-triage--data)
+		image-triage--file-name directory
+		image-triage--last-process nil
+		image-triage--marked-files old-marked
+		image-triage--sort-mode old-sort)
+    (unless image-triage--sort-mode
+      (setq image-triage--sort-mode 'time))
+    (setq default-directory directory)
+    (add-hook 'window-scroll-functions #'image-triage--window-update
+	      nil t)
+    (image-triage--insert
+     (if (eq image-triage--sort-mode 'time)
+	 (sort files (lambda (f1 f2)
+		       ;; Sort newest first by default.
+		       (time-less-p (file-attribute-modification-time
+				     (file-attributes f2))
+				    (file-attribute-modification-time
+				     (file-attributes f1)))))
+       ;; Alphabeticalish.
+       (sort files #'string-version-lessp)))
+    (or (and current
+	     (image-triage--goto-file current))
+	(goto-char point))
+    (beginning-of-line)
+    (image-triage--fill-thumbnails)))
 
 (defun image-triage--insert (files)
   (let* ((twidth (* image-triage-image-height 3))
@@ -567,16 +580,20 @@ Otherwise, create a new buffer."
 	     (let ((data nil))
 	       (goto-char (point-min))
 	       (unwind-protect
-		   (let ((json (elt (json-parse-buffer :object-type 'plist) 0))
+		   (let ((json (elt (ignore-errors
+				      (json-parse-buffer :object-type 'plist))
+				    0))
 			 (case-fold-search t))
 		     (cl-loop for (slot value) on json by #'cddr
 			      do (cond
-				  ((string-match-p "thumbnail" (symbol-name slot))
+				  ((string-match-p
+				    "thumbnail" (symbol-name slot))
 				   (push (list 'thumbnail
 					       (substring (symbol-name slot) 1)
 					       (image-triage--exif-bytes value))
 					 data))
-				  ((string-match-p "preview" (symbol-name slot))
+				  ((string-match-p
+				    "preview" (symbol-name slot))
 				   (push (list 'preview
 					       (substring (symbol-name slot) 1)
 					       (image-triage--exif-bytes value))
