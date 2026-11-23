@@ -159,6 +159,7 @@
   "u" #'image-triage-list-unmark
   "g" #'image-triage-list-reload
   "C" #'image-triage-list-copy
+  "D" #'image-triage-list-delete
   "s" #'image-triage-list-toggle-sort)
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
@@ -192,7 +193,7 @@ If none are marked, copy the file under point."
      (lambda (file)
        (let ((to (expand-file-name (file-name-nondirectory file) to-directory)))
 	 (if (file-exists-p to)
-	     (format "Overwrite %s?" to)
+	     (format "Overwrite %s? " to)
 	   t)))
      (lambda (file)
        (copy-file file (expand-file-name (file-name-nondirectory file)
@@ -201,6 +202,25 @@ If none are marked, copy the file under point."
        (cl-incf done))
      files)
     (message "Copied %s file%s" done (if (= done 1) "" "s"))))
+
+(defun image-triage-list-delete (files)
+  "Delete the marked files.
+If none are marked, delete the file under point."
+  (interactive (list (image-triage--current-files)) image-triage-list-mode)
+  (unless files
+    (user-error "No file under point"))
+  (let ((done 0))
+    (map-y-or-n-p
+     (lambda (file)
+       (format "Delete %s? " file))
+     (lambda (file)
+       (delete-file file)
+       (image-triage--goto-file file)
+       (let ((inhibit-read-only t))
+	 (delete-region (pos-bol) (pos-bol 2)))
+       (cl-incf done))
+     files)
+    (message "Deleted %s file%s" done (if (= done 1) "" "s"))))
 
 (defun image-triage-list-toggle-mark ()
   "Toggle the mark on the image under point."
