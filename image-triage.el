@@ -32,6 +32,7 @@
 (defvar image-triage--last-process)
 (defvar image-triage--parent-buffer)
 (defvar image-triage--marked-files)
+(defvar image-triage--sort-mode)
 
 (defun image-triage-directory (directory)
   (interactive "DView directory: ")
@@ -48,17 +49,31 @@
 	  (old-data (and (boundp 'image-triage--data)
 			 image-triage--data))
 	  (old-marked (and (boundp 'image-triage--marked-files)
-			   image-triage--marked-files)))
+			   image-triage--marked-files))
+	  (old-sort (and (boundp 'image-triage--sort-mode)
+			 image-triage--sort-mode)))
       (erase-buffer)
       (image-triage-list-mode)
       (setq-local image-triage--data (or old-data image-triage--data)
 		  image-triage--file-name directory
 		  image-triage--last-process nil
-		  image-triage--marked-files old-marked)
+		  image-triage--marked-files old-marked
+		  image-triage--sort-mode old-sort)
+      (unless image-triage--sort-mode
+	(setq image-triage--sort-mode 'time))
       (setq default-directory directory)
       (add-hook 'window-scroll-functions #'image-triage--window-update
 		nil t)
-      (image-triage--insert files)
+      (image-triage--insert
+       (if (eq image-triage--sort-mode 'time)
+	   (sort files (lambda (f1 f2)
+			 ;; Sort newest first by default.
+			 (time-less-p (file-attribute-modification-time
+				       (file-attributes f2))
+				      (file-attribute-modification-time
+				       (file-attributes f1)))))
+	 ;; Alphabeticalish.
+	 (sort files #'string-version-lessp)))
       (or (and current
 	       (image-triage--goto-file current))
 	  (goto-char point))
@@ -139,22 +154,37 @@
 (defvar-keymap image-triage-list-mode-map
   "RET" #'image-triage-display-image
   "SPC" #'image-triage-list-toggle-mark
-  "s" #'image-triage-toggle-sort)
+  "g" #'image-triage-list-reload
+  "s" #'image-triage-list-toggle-sort)
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
   :interactive nil
   (setq truncate-lines t)
   (setq-local image-triage--data (make-hash-table :test #'equal)) )
 
-(defun image-triage-list-toggle-mark (file)
+(defun image-triage-list-toggle-sort ()
+  "Toggle sorting by time/alphabet."
+  (interactive nil image-triage-list-mode)
+  (setq image-triage--sort-mode
+	(if (eq image-triage--sort-mode 'time)
+	    'alpha 'time))
+  (image-triage-list-reload))
+
+(defun image-triage-list-reload ()
+  "Reload the current list."
+  (interactive nil image-triage-list-mode)
+  (image-triage-directory image-triage--file-name))
+
+(defun image-triage-list-toggle-mark ()
   "Toggle the image under point."
-  (interactive (list (image-triage--file-name)) image-triage-list-mode)
-  (unless file
-    (user-error "No file under point"))
-  (save-excursion
-    (beginning-of-line)
-    (text-property-search-forward 'toggle)
-    (let ((inhibit-read-only t))
+  (interactive nil image-triage-list-mode)
+  (let ((file (image-triage--file-name))
+	(inhibit-read-only t))
+    (unless file
+      (user-error "No file under point"))
+    (save-excursion
+      (beginning-of-line)
+      (text-property-search-forward 'toggle)
       (if (member file image-triage--marked-files)
 	  (progn
 	    (setq image-triage--marked-files
