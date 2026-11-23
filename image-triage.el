@@ -25,7 +25,10 @@
 (defvar image-triage-file-name-regexps image-type-file-name-regexps
   "Alist of regexps for matching image file names.")
 
+(defvar image-triage-image-height 60
+  "The height (in pixels) of image thumbnails.")
 (defvar image-triage--data)
+(defvar image-triage--file-name)
 
 (defun image-triage-directory (directory)
   (interactive "DView directory: ")
@@ -34,12 +37,14 @@
 		  (seq-filter (lambda (file)
 				(string-match-p regexp file))
 			      (directory-files directory t)))))
-    (switch-to-buffer (create-file-buffer directory))
+    (setq directory (expand-file-name directory))
+    (switch-to-buffer (image-triage--create-buffer directory))
     (let ((inhibit-read-only t)
 	  (current (image-triage--file-name))
 	  (point (point)))
       (erase-buffer)
       (image-triage-list-mode)
+      (setq-local image-triage--file-name directory)
       (image-triage--insert files)
       (or (and current
 	       (image-triage--goto-file current))
@@ -47,22 +52,38 @@
       (beginning-of-line))))
 
 (defun image-triage--insert (files)
-  (let ((swidth (string-pixel-width (propertize "9999G" 'face 'variable-pitch)))
-	(dwidth (max (string-pixel-width
-		      (propertize "WWW 30 2019" 'face 'variable-pitch))
-		     (string-pixel-width
-		      (propertize "99:99 2019" 'face 'variable-pitch))))
-	(new (- (time-convert nil 'integer)
-		(* 60 60 24 300))))
+  (let* ((twidth (* image-triage-image-height 3))
+	 (swidth (string-pixel-width
+		  (propertize "9999G" 'face 'variable-pitch)))
+	 (dwidth (max (string-pixel-width
+		       (propertize "WWW 30 2019" 'face 'variable-pitch))
+		      (string-pixel-width
+		       (propertize "99:99 2019" 'face 'variable-pitch))))
+	 (new (- (time-convert nil 'integer)
+		 (* 60 60 24 300)))
+	 (seps
+	  (list
+	   (propertize " " 'display `(space :align-to (,twidth)))
+	   (propertize " " 'display
+		       `(space :align-to (,(+ twidth 10 swidth))))
+	   (propertize " " 'display `(space :align-to
+					    (,(+ twidth 20 swidth dwidth)))))))
+    (setq header-line-format
+	  (propertize
+	   (concat
+	    "Thumb" (nth 0 seps)
+	    "Size" (nth 1 seps)
+	    "Date" (nth 2 seps)
+	    "File")
+	   'face 'variable-pitch))
     (dolist (file files)
       (let ((atts (file-attributes file)))
-	(insert (propertize " " 'display '(space :align-to (100))
+	(insert (propertize (nth 0 seps)
 			    'image-triage--file file)
 		(propertize
 		 (file-size-human-readable (file-attribute-size atts))
 		 'face 'variable-pitch)
-		(propertize " " 'display
-			    `(space :align-to (,(+ 100 10 swidth))))
+		(nth 1 seps)
 		(propertize
 		 (if (> (time-convert (file-attribute-modification-time atts)
 				      'integer)
@@ -74,15 +95,14 @@
 		    "%b %d %Y"
 		    (file-attribute-modification-time atts)))
 		 'face 'variable-pitch)
-		(propertize " " 'display `(space :align-to
-						 (,(+ 100 20 swidth dwidth))))
-		(file-name-nondirectory file)
-		"\n")))))
+		(nth 2 seps)
+		(propertize (file-name-nondirectory file) 'face 'variable-pitch)
+		(propertize "\n" 'line-height image-triage-image-height))))))
 
 (defun image-triage--goto-file (file)
   (let ((point (point)))
     (goto-char (point-min))
-    (or (text-property-search-forward 'image-triage--file file)
+    (or (text-property-search-forward 'image-triage--file file #'equal)
 	(progn
 	  (goto-char point)
 	  nil))))
@@ -107,7 +127,7 @@
   (unless (file-exists-p file)
     (user-error "File %s does not exist file"))
   (let ((elem (gethash file image-triage--data)))
-    (switch-to-buffer (create-file-buffer file))
+    (switch-to-buffer (image-triage--create-buffer file))
     (image-triage-display-mode)
     (let ((inhibit-read-only t)
 	  (idata (plist-get elem 'display)))
@@ -119,6 +139,18 @@
 		:max-width (truncate (* (frame-pixel-width) 0.9))
 		:max-height (truncate (* (frame-pixel-height) 0.9)))))
       (goto-char (point-min)))))
+
+(defun image-triage--create-buffer (file)
+  (or
+   (cl-loop for buffer in (buffer-list)
+	    when (equal (with-current-buffer buffer
+			  (and (boundp 'image-triage--file-name)
+			       image-triage--file-name))
+			file)
+	    return buffer)
+   (generate-new-buffer-name
+    (concat (file-name-nondirectory (directory-file-name file))
+	    " Triage"))))
 
 (define-derived-mode image-triage-display-mode special-mode "Triage Display"
   :interactive nil
