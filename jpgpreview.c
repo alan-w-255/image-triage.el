@@ -7,7 +7,9 @@
 
    Exit status: 0 = written to stdout, 1 = not present, 2 = error/usage.
 
-   Build: cc -O2 -Wall -o jpgpreview jpgpreview.c  */
+   Build: cc -O2 -Wall -o jpgpreview jpgpreview.c
+
+   This file was written by Claude Fable 5.2.  */
 
 #include <stdio.h>
 #include <stdlib.h>
