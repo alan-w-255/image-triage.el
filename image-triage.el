@@ -155,8 +155,10 @@
   "RET" #'image-triage-display-image
   "SPC" #'image-triage-list-toggle-mark
   "m" #'image-triage-list-mark
+  "U" #'image-triage-list-unmark-all
   "u" #'image-triage-list-unmark
   "g" #'image-triage-list-reload
+  "C" #'image-triage-list-copy
   "s" #'image-triage-list-toggle-sort)
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
@@ -176,6 +178,29 @@
   "Reload the current list."
   (interactive nil image-triage-list-mode)
   (image-triage-directory image-triage--file-name))
+
+(defun image-triage-list-copy (files to-directory)
+  "Copy the marked files somewhere.
+If none are marked, copy the file under point."
+  (interactive (list (image-triage--current-files)
+		     (read-directory-name "Copy to: "))
+	       image-triage-list-mode)
+  (unless files
+    (user-error "No file under point"))
+  (let ((done 0))
+    (map-y-or-n-p
+     (lambda (file)
+       (let ((to (expand-file-name (file-name-nondirectory file) to-directory)))
+	 (if (file-exists-p to)
+	     (format "Overwrite %s?" to)
+	   t)))
+     (lambda (file)
+       (copy-file file (expand-file-name (file-name-nondirectory file)
+					 to-directory)
+		  t t)
+       (cl-incf done))
+     files)
+    (message "Copied %s file%s" done (if (= done 1) "" "s"))))
 
 (defun image-triage-list-toggle-mark ()
   "Toggle the mark on the image under point."
@@ -203,7 +228,26 @@
 			    ?\s ?*)
       (message "Marked %s" file))))
 
-(defun image-triage-list-unmark ()
+(defun image-triage-list-unmark-all ()
+  "Unset the mark on all images."
+  (interactive nil image-triage-list-mode)
+  (unless image-triage--marked-files
+    (user-error "No files have been marked"))
+  (let ((count 0))
+    (save-excursion
+      (dolist (file image-triage--marked-files)
+	(image-triage--goto-file file)
+	(image-triage-list-unmark t)
+	(cl-incf count)))
+    (message "Unmarked %s file%s" count (if (= count 1) "" "s"))))
+
+(defun image-triage--current-files ()
+  "Return the list of marked files, or if none, the file under point."
+  (or image-triage--marked-files
+      (when-let ((file (image-triage--file-name)))
+	(list file))))
+
+(defun image-triage-list-unmark (&optional silent)
   "Unset the mark on the image under point."
   (interactive nil image-triage-list-mode)
   (let ((file (image-triage--file-name))
@@ -217,7 +261,8 @@
 	    (delete file image-triage--marked-files))
       (subst-char-in-region (point) (1- (point))
 			    ?* ?\s)
-      (message "Removed mark from %s" file))))
+      (unless silent
+	(message "Removed mark from %s" file)))))
 
 (defun image-triage-display-image (file)
   "Display the image under point."
