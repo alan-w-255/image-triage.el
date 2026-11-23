@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/stat.h>
 
 static int le;			/* byte order of the current TIFF block */
 
@@ -142,7 +143,13 @@ copy_range (FILE *f, long pos, size_t len)
 {
   unsigned char buf[65536];
   int first = 1;
+  struct stat st;
 
+  /* Refuse ranges that run past the end of the file, so a lying MPF
+     entry doesn't produce truncated output.  */
+  if (fstat (fileno (f), &st) != 0 || pos < 0
+      || (uintmax_t) pos + len > (uintmax_t) st.st_size)
+    return 1;
   if (fseek (f, pos, SEEK_SET) != 0)
     return 1;
   while (len > 0)
