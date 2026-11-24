@@ -184,16 +184,27 @@ If GRID (interactively, the prefix), display images in a grid."
 			    (+ image-triage-thumbnail-height 8)))))))
 
 (defun image-triage--insert-grid (files)
-  (let ((columns (truncate
+  (let* ((columns (truncate
 		  (1- (/ (frame-pixel-width) image-triage-thumbnail-width))))
+	;; Directories often contain a bunch of images of the same
+	;; size.  So using the size of the first image in the
+	;; directory to guess at a reasonable image height seems, er,
+	;; reasonable.
+	(size (image-size (create-image (image-triage--preview (car files))
+					nil t :scale 1)
+			  t))
+	(line-height (+ (truncate (* (/ (cdr size) (float (car size)))
+				     image-triage-thumbnail-width))
+			30))
 	(column 0))
+    (message "%s %s" line-height size)
     (dolist (file files)
       (insert (propertize
 	       "*" 'image-triage--file file
 	       'display `(min-width ((,(+ image-triage-thumbnail-width 20))))))
       (if (= column columns)
 	  (progn
-	    (insert (propertize "\n" 'line-height 200))
+	    (insert (propertize "\n" 'line-height line-height))
 	    (setq column 0))
 	(cl-incf column)))))
 
@@ -608,8 +619,12 @@ things up.)"
 		       when (string-match-p "preview" (symbol-name slot))
 		       return (substring (symbol-name slot) 1))))
 	(erase-buffer)
-	(call-process "exiftool" nil t nil
-		      "-b" (concat "-" preview-name) file))))
+	(if preview-name
+	    (call-process "exiftool" nil t nil
+			  "-b" (concat "-" preview-name) file)
+	  ;; No preview -- downscale ourselves.
+	  (call-process "convert" nil t nil
+			"-resize" "800x" file "jpg:-")))))
     (buffer-string)))
 
 (defun image-triage--create-buffer (file)
@@ -767,7 +782,7 @@ Otherwise, create a new buffer."
 				 :width image-triage-thumbnail-width
 				 :scale 1
 				 :ascent 100
-				 :margin 10)))))
+				 :margin '(10 . 0))))))
 	  (error nil)))))))
 
 (defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast
