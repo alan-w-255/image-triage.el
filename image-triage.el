@@ -40,6 +40,7 @@
 (defvar image-triage--parent-buffer)
 (defvar image-triage--marked-files)
 (defvar image-triage--sort-mode)
+(defvar image-triage--list-mode)
 (defvar image-triage--precomputed-previews)
 
 (defvar image-triage--thumbnail-instance 0)
@@ -57,7 +58,8 @@
 			;; `case-fold-search', so we do it the hard
 			;; way.
 			(directory-files directory t)))))
-    (image-triage--setup directory files)))
+    (image-triage--setup directory files)
+    (setq-local image-triage--list-mode 'directory)))
 
 (defun image-triage-tree (directory)
   "View all images under DIRECTORY, recursively."
@@ -66,7 +68,8 @@
 		 (directory-files-recursively
 		  (expand-file-name directory)
 		  (mapconcat #'car image-triage-file-name-regexps "\\|")))))
-    (image-triage--setup directory files)))
+    (image-triage--setup directory files)
+    (setq-local image-triage--list-mode 'tree)))
 
 (defun image-triage--setup (directory files)
   (setq directory (expand-file-name directory))
@@ -215,8 +218,9 @@
 (defun image-triage-list-reload ()
   "Reload the current list of images."
   (interactive nil image-triage-list-mode)
-  ;; FIXME Doesn't work in tree mode.
-  (image-triage-directory image-triage--file-name))
+  (if (eq image-triage--list-mode 'directory)
+      (image-triage-directory image-triage--file-name)
+    (image-triage-tree image-triage--file-name)))
 
 (defun image-triage-list-copy (files to-directory)
   "Copy the marked files somewhere.
