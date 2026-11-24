@@ -274,18 +274,17 @@ If none are marked, copy the file under point."
 	       image-triage-list-mode)
   (unless files
     (user-error "No file under point"))
-  (if (length= files 1)
-      ;; If we're copying a single file, we may either be copying to a
-      ;; directory, or copying it to a specific new file name.
+  (if (and (length= files 1)
+	   (not (file-directory-p to-directory)))
+      ;; Copying a single file, and not to a directory.
       (cond
-       ((file-directory-p to-directory)
-	(copy-file (car files) to-directory nil t))
        ((or (not (file-exists-p to-directory))
 	    (yes-or-no-p (format "Overwrite %s? " to-directory)))
 	(copy-file (car files) to-directory t t)
 	(message "Copied 1 file"))
        (t
 	(message "Copy aborted")))
+    ;; Copying lots of files.
     (let ((done 0))
       (map-y-or-n-p
        (lambda (file)
@@ -359,12 +358,16 @@ If none are marked, delete the file under point."
     (unless file
       (user-error "No file under point"))
     (save-excursion
-      (beginning-of-line)
-      (text-property-search-forward 'toggle)
+      (if (eq image-triage--layout 'list)
+	  (progn
+	    (beginning-of-line)
+	    (text-property-search-forward 'toggle)
+	    ;; We do it like this to preserve text properties.
+	    (subst-char-in-region (point) (1- (point)) ?\s ?*))
+	(put-text-property (point) (1+ (point))
+			   'face `(:box (:line-width 1 :color "blue"))))
       (setq image-triage--marked-files (delete file image-triage--marked-files))
       (push file image-triage--marked-files)
-      ;; We do it like this to preserve text properties.
-      (subst-char-in-region (point) (1- (point)) ?\s ?*)
       (message "Marked %s" file))))
 
 (defun image-triage-list-unmark-all ()
@@ -394,11 +397,16 @@ If none are marked, delete the file under point."
     (unless file
       (user-error "No file under point"))
     (save-excursion
-      (beginning-of-line)
-      (text-property-search-forward 'toggle)
+      (if (eq image-triage--layout 'list)
+	  (progn
+	    (beginning-of-line)
+	    (text-property-search-forward 'toggle)
+	    (subst-char-in-region (point) (1- (point)) ?* ?\s))
+	(put-text-property (point) (1+ (point))
+			   'face `(:box ( :line-width 1
+					  :color ,(face-background 'default)))))
       (setq image-triage--marked-files
 	    (delete file image-triage--marked-files))
-      (subst-char-in-region (point) (1- (point)) ?* ?\s)
       (unless silent
 	(message "Removed mark from %s" file)))))
 
@@ -724,7 +732,6 @@ Otherwise, create a new buffer."
 		(cl-incf checked-lines))))))))))
 
 (defun image-triage--insert-thumbnail (data &optional dummy)
-  (message "%s" (point))
   (let ((inhibit-read-only t))
     (cond
      ;; We have no data, but mark the line.
@@ -749,6 +756,7 @@ Otherwise, create a new buffer."
 	      " "
 	      'image-triage--file file
 	      'thumbnail t
+	      'face `(:box (:line-width 1 :color ,(face-background 'default)))
 	      'display
 	      `(,(if (eq image-triage--layout 'list)
 		     (create-image data nil t
