@@ -28,7 +28,10 @@
   "Alist of regexps for matching image file names.")
 
 (defvar image-triage-thumbnail-height 80
-  "The height (in pixels) of image thumbnails.")
+  "The height (in pixels) of image thumbnails in list mode.")
+
+(defvar image-triage-thumbnail-width 200
+  "The width (in pixels) of image thumbnails in grid mode.")
 
 (defvar image-triage-preview-height 800
   "The height (in pixels) of image previews.")
@@ -42,13 +45,15 @@
 (defvar image-triage--sort-mode)
 (defvar image-triage--list-mode)
 (defvar image-triage--precomputed-previews)
+(defvar image-triage--layout)
 
 (defvar image-triage--thumbnail-instance 0)
 (defvar image-triage--preview-instance 0)
 
-(defun image-triage-directory (directory)
-  "View all images under DIRECTORY."
-  (interactive "DView directory: ")
+(defun image-triage-directory (directory &optional grid)
+  "View all images under DIRECTORY.
+If GRID (interactively, the prefix), display images in a grid."
+  (interactive "DView directory: \nP")
   (let* ((regexp (mapconcat #'car image-triage-file-name-regexps "\\|"))
 	 (files
 	  (let ((case-fold-search t))
@@ -58,24 +63,26 @@
 			;; `case-fold-search', so we do it the hard
 			;; way.
 			(directory-files directory t)))))
-    (image-triage--setup directory files)
+    (image-triage--setup directory files grid)
     (setq-local image-triage--list-mode 'directory)))
 
-(defun image-triage-tree (directory)
-  "View all images under DIRECTORY, recursively."
-  (interactive "DView all images under directory: ")
+(defun image-triage-tree (directory &optional grid)
+  "View all images under DIRECTORY, recursively.
+If GRID (interactively, the prefix), display images in a grid."
+  (interactive "DView all images under directory: \nP")
   (let ((files (let ((case-fold-search t))
 		 (directory-files-recursively
 		  (expand-file-name directory)
 		  (mapconcat #'car image-triage-file-name-regexps "\\|")))))
-    (image-triage--setup directory files)
+    (image-triage--setup directory files grid)
     (setq-local image-triage--list-mode 'tree)))
 
-(defun image-triage--setup (directory files)
+(defun image-triage--setup (directory files grid)
   (setq directory (expand-file-name directory))
   (switch-to-buffer (image-triage--create-buffer directory))
   (let ((inhibit-read-only t)
-	(current (image-triage--file-name))
+	(current (and (eq major-mode 'image-triage-list-mode)
+		      (image-triage--file-name)))
 	(point (point)))
     (erase-buffer)
     ;; Avoid erasing buffer-local variables if we're just doing a
@@ -83,32 +90,36 @@
     (unless (eq major-mode 'image-triage-list-mode)
       (image-triage-list-mode))
     (setq-local image-triage--file-name directory
-		image-triage--last-process nil)
+		image-triage--last-process nil
+		image-triage--layout (if grid 'grid 'list))
     ;; We default to sorting by newest first.
     (unless image-triage--sort-mode
       (setq image-triage--sort-mode 'time))
     (setq default-directory directory)
-    ;; Automatically update when we scroll.
-    (add-hook 'window-scroll-functions #'image-triage--window-update
-	      nil t)
-    (image-triage--insert
-     (if (eq image-triage--sort-mode 'time)
-	 (sort files (lambda (f1 f2)
-		       ;; Sort newest first.
-		       (time-less-p (file-attribute-modification-time
-				     (file-attributes f2))
-				    (file-attribute-modification-time
-				     (file-attributes f1)))))
-       ;; Alphabeticalish.
-       (sort files #'string-version-lessp)))
+    (let ((sorted-files
+	   (if (eq image-triage--sort-mode 'time)
+	       (sort files (lambda (f1 f2)
+			     ;; Sort newest first.
+			     (time-less-p (file-attribute-modification-time
+					   (file-attributes f2))
+					  (file-attribute-modification-time
+					   (file-attributes f1)))))
+	     ;; Alphabeticalish.
+	     (sort files #'string-version-lessp))))
+      (if grid
+	  (image-triage--insert-grid sorted-files)
+	(image-triage--insert-list sorted-files)))
     ;; When refreshing, try to keep the same position.
     (or (and current
 	     (image-triage--goto-file current))
 	(goto-char point))
     (beginning-of-line)
+    ;; Automatically update when we scroll.
+    (add-hook 'window-scroll-functions #'image-triage--window-update
+	      nil t)
     (image-triage--fill-thumbnails)))
 
-(defun image-triage--insert (files)
+(defun image-triage--insert-list (files)
   ;; We do this buffer the hard way -- by precomputing some defaults
   ;; and then using them throughout.  This is much faster than doing
   ;; things properly like `vtable' does, but speed is important here
@@ -146,8 +157,7 @@
 	   'face 'variable-pitch))
     (dolist (file files)
       (let ((atts (file-attributes file)))
-	(insert (propertize (nth 0 seps)
-			    'image-triage--file file)
+	(insert (propertize (nth 0 seps) 'image-triage--file file)
 		(propertize 
 		 (if (member file image-triage--marked-files)
 		     "*" " ")
@@ -173,10 +183,32 @@
 		(propertize "\n" 'line-height
 			    (+ image-triage-thumbnail-height 8)))))))
 
+(defun image-triage--insert-grid (files)
+  (let ((columns (truncate
+		  (1- (/ (frame-pixel-width) image-triage-thumbnail-width))))
+	(column 0))
+    (dolist (file files)
+      (insert (propertize "*" 'image-triage--file file)
+	      (propertize
+	       " " 'display
+	       `(space :align-to (,(* (1+ column)
+				      (+ image-triage-thumbnail-width 20))))))
+      (if (= column columns)
+	  (progn
+	    (insert (propertize "\n" 'line-height 200))
+	    (setq column 0))
+	(cl-incf column)))))
+
 (defun image-triage--goto-file (file)
   (let ((point (point)))
     (goto-char (point-min))
-    (or (text-property-search-forward 'image-triage--file file #'equal)
+    (or (when-let ((match
+		    (text-property-search-forward 'image-triage--file
+						  file #'equal)))
+	  (if (eq image-triage--layout 'line)
+	      (beginning-of-line)
+	    (goto-char (prop-match-beginning match)))
+	  t)
 	(progn
 	  ;; Restore point.
 	  (goto-char point)
@@ -184,7 +216,12 @@
 
 (defun image-triage--file-name ()
   "Return the name of the file on the current line."
-  (get-text-property (pos-bol) 'image-triage--file))
+  (if (eq image-triage--layout 'list)
+      (get-text-property (pos-bol) 'image-triage--file)
+    (or (get-text-property (point) 'image-triage--file)
+	(save-excursion
+	  (and (text-property-search-forward 'image-triage--file)
+	       (get-text-property (point) 'image-triage--file))))))
 
 (defvar-keymap image-triage-list-mode-map
   "RET" #'image-triage-display-image
@@ -390,6 +427,22 @@ If none are marked, delete the file under point."
   (interactive nil image-triage-display-mode)
   (image-triage--move 'previous))
 
+(defun image-triage--next-file ()
+  (if (eq image-triage--layout 'list)
+      (and (forward-line 1)
+	   (image-triage--file-name))
+    (when-let ((match (text-property-search-forward 'image-triage--file
+						    nil nil t)))
+      (goto-char (prop-match-beginning match))
+      (prop-match-value match))))
+
+(defun image-triage--previous-file ()
+  (if (eq image-triage--layout 'list)
+      (and (zerop (forward-line -1))
+	   (image-triage--file-name))
+    (when-let ((match (text-property-search-backward 'image-triage--file)))
+      (prop-match-value match))))
+
 (defun image-triage--move (direction)
   (let ((parent image-triage--parent-buffer)
 	(file image-triage--file-name)
@@ -402,10 +455,10 @@ If none are marked, delete the file under point."
       (let ((point (point)))
 	(if (equal direction 'next)
 	    (progn
-	      (forward-line 1)
+	      (image-triage--next-file)
 	      (setq next-file (image-triage--file-name)))
 	  (unless (bobp)
-	    (forward-line -1)
+	    (image-triage--previous-file)
 	    (setq next-file (image-triage--file-name))))
 	(unless next-file
 	  (goto-char point)
@@ -502,10 +555,10 @@ things up.)"
 		(when (image-triage--goto-file from-file)
 		  (cl-loop repeat 5
 			   for file = (image-triage--file-name)
-			   while (not (eobp))
+			   while file
 			   unless (assoc file precomputed)
 			   collect file
-			   do (forward-line 1)))))))
+			   do (image-triage--next-file)))))))
       (when next-files
 	(image-triage--preload-1 (current-buffer) next-files
 				 (cl-incf image-triage--preview-instance))))))
@@ -640,7 +693,7 @@ Otherwise, create a new buffer."
 	  (while (and (< (point) end)
 		      (not done))
 	    (check)
-	    (forward-line 1)
+	    (image-triage--next-file)
 	    (cl-incf lines))
 	  ;; Do the next screen and a half.
 	  (setq lines (truncate (* lines 1.5)))
@@ -650,7 +703,7 @@ Otherwise, create a new buffer."
 			  (not done)
 			  (not (eobp)))
 		(check)
-		(forward-line 1)
+		(image-triage--next-file)
 		(cl-incf checked-lines))))
 	  ;; Do the previous screen and a half.
 	  (unless done
@@ -661,12 +714,12 @@ Otherwise, create a new buffer."
 		(check)
 		(if (bobp)
 		    (setq done t)
-		  (forward-line -1))
+		  (image-triage--previous-file))
 		(cl-incf checked-lines))))))))))
 
 (defun image-triage--insert-thumbnail (data &optional dummy)
+  (message "%s" (point))
   (let ((inhibit-read-only t))
-    (beginning-of-line)
     (cond
      ;; We have no data, but mark the line.
      (dummy
@@ -679,19 +732,20 @@ Otherwise, create a new buffer."
       ;; never happen, so it's just a sanity check against two
       ;; fetching threads going off at once.
       )
-     ;; Protect against invalid image data.
      (t
-      (condition-case ()
-	  (insert-image
-	   (create-image data nil t
-			 :height image-triage-thumbnail-height
-			 :scale 1
-			 :ascent 100)
-	   (propertize " " 'image-triage--file
-		       (get-text-property
-			(point) 'image-triage--file)
-		       'thumbnail t))
-	(error nil))))))
+      (let ((file (get-text-property
+		   (point) 'image-triage--file)))
+	(delete-region (point) (1+ (point)))
+	;; Protect against invalid image data.
+	(condition-case ()
+	    (insert-image
+	     (create-image data nil t
+			   :height image-triage-thumbnail-height
+			   :scale 1
+			   :ascent 100)
+	     (propertize " " 'image-triage--file file
+			 'thumbnail t))
+	  (error nil)))))))
 
 (defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast
 					   preview)
