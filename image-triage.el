@@ -636,7 +636,11 @@ Otherwise, create a new buffer."
 (defun image-triage--window-update (_ _)
   ;; `window-end' isn't updated right away, apparently, so postpone
   ;; this slightly.
-  (run-at-time 0.01 nil #'image-triage--fill-thumbnails))
+  (let ((buffer (current-buffer)))
+    (run-at-time 0.01 nil
+		 (lambda ()
+		   (with-current-buffer buffer
+		     (image-triage--fill-thumbnails))))))
 
 (defun image-triage--fill-thumbnails ()
   (when (and (boundp 'image-triage--last-process)
