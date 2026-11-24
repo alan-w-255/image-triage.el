@@ -69,22 +69,14 @@
   (switch-to-buffer (image-triage--create-buffer directory))
   (let ((inhibit-read-only t)
 	(current (image-triage--file-name))
-	(point (point))
-	;; If we're refreshing the buffer, then we want to keep the
-	;; data from the old version of the buffer.
-	(old-data (and (boundp 'image-triage--data)
-		       image-triage--data))
-	(old-marked (and (boundp 'image-triage--marked-files)
-			 image-triage--marked-files))
-	(old-sort (and (boundp 'image-triage--sort-mode)
-		       image-triage--sort-mode)))
+	(point (point)))
     (erase-buffer)
-    (image-triage-list-mode)
-    (setq-local image-triage--data (or old-data image-triage--data)
-		image-triage--file-name directory
-		image-triage--last-process nil
-		image-triage--marked-files old-marked
-		image-triage--sort-mode old-sort)
+    ;; Avoid erasing buffer-local variables if we're just doing a
+    ;; refresh of the buffer.
+    (unless (eq major-mode 'image-triage-list-mode)
+      (image-triage-list-mode))
+    (setq-local image-triage--file-name directory
+		image-triage--last-process nil)
     ;; We default to sorting by newest first.
     (unless image-triage--sort-mode
       (setq image-triage--sort-mode 'time))
