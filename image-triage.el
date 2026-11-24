@@ -39,6 +39,8 @@
 (defvar image-triage--sort-mode)
 (defvar image-triage--precomputed-previews)
 
+(defvar image-triage--thumbnail-instance 0)
+
 (defun image-triage-directory (directory)
   "View all images under DIRECTORY."
   (interactive "DView directory: ")
@@ -536,19 +538,22 @@ Otherwise, create a new buffer."
 (defun image-triage--fill-thumbnails ()
   (when (and (boundp 'image-triage--last-process)
 	     (or (null image-triage--last-process)
-		 ;; More than half a second since the last time, so it's
+		 ;; More than 200ms since the last time, so it's
 		 ;; probably done.
 		 (time-less-p
-		  '(0 0 100000 0)
+		  '(0 0 200000 0)
 		  (time-since image-triage--last-process))))
     ;; We want to fill thumbnails on files that's displayed in the
     ;; window, and then the next window-ful, and then the previous
     ;; window-ful.
     (let ((buffer (current-buffer))
-	  function)
+	  function instance)
+      ;; This is used to reduce parallellism -- in case two processes
+      ;; are fired off at the same time anyway.
+      (setq instance (cl-incf image-triage--thumbnail-instance))
       (setq function
 	    (lambda ()
-	      (image-triage--fill-thumbnails-1 buffer function)))
+	      (image-triage--fill-thumbnails-1 buffer function instance)))
       ;; We call the function this awkward way because we're passing
       ;; the function in to itself.  The function will load one
       ;; thumbnail (asynchronously), and then at the end, it will call
@@ -556,7 +561,7 @@ Otherwise, create a new buffer."
       ;; sufficient number of thumbnails.
       (funcall function))))
 
-(defun image-triage--fill-thumbnails-1 (buffer next)
+(defun image-triage--fill-thumbnails-1 (buffer next instance)
   ;; Only do something if the buffer is visible.
   (when-let ((window (get-buffer-window buffer t)))
     (with-current-buffer buffer
@@ -571,7 +576,10 @@ Otherwise, create a new buffer."
 			  (if (plist-get elem 'thumbnail)
 			      (image-triage--insert-thumbnail
 			       (plist-get elem 'thumbnail))
-			    (image-triage--fetch-thumbnail file buffer next)
+			    ;; If something else has fired off a new thumbnail
+			    ;; fetcher, then we stop.
+			    (when (= instance image-triage--thumbnail-instance)
+			      (image-triage--fetch-thumbnail file buffer next))
 			    (setq done t)))))))
 	(save-excursion
 	  (goto-char start)
