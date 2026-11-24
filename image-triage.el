@@ -225,28 +225,45 @@
 (defun image-triage-list-copy (files to-directory)
   "Copy the marked files somewhere.
 If none are marked, copy the file under point."
-  (interactive (list (image-triage--current-files)
-		     ;; FIXME: When copying a single file, you should
-		     ;; be able to give it a new name, not just copy
-		     ;; to a directory.
-		     (read-directory-name "Copy to: "))
+  (interactive (let ((files (image-triage--current-files)))
+		 (list files
+		       (cond
+			((length= files 0)
+			 (user-error "No file under point"))
+			((length= files 1)
+			 (read-file-name "Copy to: "))
+			(t
+			 (read-directory-name "Copy to: ")))))
 	       image-triage-list-mode)
   (unless files
     (user-error "No file under point"))
-  (let ((done 0))
-    (map-y-or-n-p
-     (lambda (file)
-       (let ((to (expand-file-name (file-name-nondirectory file) to-directory)))
-	 (if (file-exists-p to)
-	     (format "Overwrite %s? " to)
-	   t)))
-     (lambda (file)
-       (copy-file file (expand-file-name (file-name-nondirectory file)
-					 to-directory)
-		  t t)
-       (cl-incf done))
-     files)
-    (message "Copied %s file%s" done (if (= done 1) "" "s"))))
+  (if (length= files 1)
+      ;; If we're copying a single file, we may either be copying to a
+      ;; directory, or copying it to a specific new file name.
+      (cond
+       ((file-directory-p to-directory)
+	(copy-file (car files) to-directory nil t))
+       ((or (not (file-exists-p to-directory))
+	    (yes-or-no-p (format "Overwrite %s? " to-directory)))
+	(copy-file (car files) to-directory t t)
+	(message "Copied 1 file"))
+       (t
+	(message "Copy aborted")))
+    (let ((done 0))
+      (map-y-or-n-p
+       (lambda (file)
+	 (let ((to (expand-file-name
+		    (file-name-nondirectory file) to-directory)))
+	   (if (file-exists-p to)
+	       (format "Overwrite %s? " to)
+	     t)))
+       (lambda (file)
+	 (copy-file file (expand-file-name (file-name-nondirectory file)
+					   to-directory)
+		    t t)
+	 (cl-incf done))
+       files)
+      (message "Copied %s files" done))))
 
 (defun image-triage-list-delete (files)
   "Delete the marked files.
