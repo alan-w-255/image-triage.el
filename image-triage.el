@@ -188,11 +188,9 @@ If GRID (interactively, the prefix), display images in a grid."
 		  (1- (/ (frame-pixel-width) image-triage-thumbnail-width))))
 	(column 0))
     (dolist (file files)
-      (insert (propertize "*" 'image-triage--file file)
-	      (propertize
-	       " " 'display
-	       `(space :align-to (,(* (1+ column)
-				      (+ image-triage-thumbnail-width 20))))))
+      (insert (propertize
+	       "*" 'image-triage--file file
+	       'display `(min-width ((,(+ image-triage-thumbnail-width 20))))))
       (if (= column columns)
 	  (progn
 	    (insert (propertize "\n" 'line-height 200))
@@ -738,13 +736,22 @@ Otherwise, create a new buffer."
 	(delete-region (point) (1+ (point)))
 	;; Protect against invalid image data.
 	(condition-case ()
-	    (insert-image
-	     (create-image data nil t
-			   :height image-triage-thumbnail-height
-			   :scale 1
-			   :ascent 100)
-	     (propertize " " 'image-triage--file file
-			 'thumbnail t))
+	    (insert
+	     (propertize
+	      " "
+	      'image-triage--file file
+	      'thumbnail t
+	      'display
+	      `(,(if (eq image-triage--layout 'list)
+		     (create-image data nil t
+				   :height image-triage-thumbnail-height
+				   :scale 1
+				   :ascent 100)
+		   (create-image data nil t
+				 :width image-triage-thumbnail-width
+				 :scale 1
+				 :ascent 100
+				 :margin 10)))))
 	  (error nil)))))))
 
 (defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast
