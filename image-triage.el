@@ -479,7 +479,7 @@ things up.)"
 	    (with-current-buffer parent
 	      (save-excursion
 		(when (image-triage--goto-file from-file)
-		  (cl-loop repeat 10
+		  (cl-loop repeat 5
 			   for file = (image-triage--file-name)
 			   while (not (eobp))
 			   unless (assoc file precomputed)
