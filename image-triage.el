@@ -254,8 +254,10 @@ If GRID (interactively, the prefix), display images in a grid."
   "Reload the current list of images."
   (interactive nil image-triage-list-mode)
   (if (eq image-triage--list-mode 'directory)
-      (image-triage-directory image-triage--file-name)
-    (image-triage-tree image-triage--file-name)))
+      (image-triage-directory image-triage--file-name
+			      (eq image-triage--layout 'grid))
+    (image-triage-tree image-triage--file-name
+		       (eq image-triage--layout 'grid))))
 
 (defun image-triage-list-copy (files to-directory)
   "Copy the marked files somewhere.
