@@ -196,7 +196,9 @@
   :interactive nil
   (buffer-disable-undo)
   (setq truncate-lines t)
-  (setq-local image-triage--data (make-hash-table :test #'equal)) )
+  (setq-local image-triage--data (make-hash-table :test #'equal)
+	      image-triage--sort-mode 'time
+	      image-triage--marked-files nil))
 
 (defun image-triage-list-toggle-sort ()
   "Toggle sorting by time/alphabet."
@@ -462,34 +464,37 @@ things up.)"
 (defun image-triage--precomputed (file)
   (cdr (assoc file image-triage--precomputed-previews)))
 
-(defun image-triage--preload (_from-file _parent)
-  ;; FIXME.
+(defun image-triage--preload (from-file parent)
+  ;; We want to preload images that come after the current viewed
+  ;; image, so that hitting `n' is fast.
+  
   )
 
+(defun image-triage--jpgpreview ()
+  (expand-file-name
+   "jpgpreview" (file-name-directory (find-library-name "image-triage.el"))))
+
 (defun image-triage--preview (file)
-  (let ((fast (expand-file-name "jpgpreview"
-				(file-name-directory
-				 (find-library-name "image-triage.el")))))
-    (with-temp-buffer
-      (set-buffer-multibyte nil)
-      (cond
-       ((file-exists-p fast)
-	(call-process fast nil t nil "preview" file))
-       (t
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (cond
+     ((file-exists-p (image-triage--jpgpreview))
+      (call-process (image-triage--jpgpreview) nil t nil "preview" file))
+     (t
+      (call-process "exiftool" nil t nil
+		    "-json" "-a" "-G1" "-s"
+		    "-preview:all" file)
+      (goto-char (point-min))
+      (let* ((json (elt (json-parse-buffer :object-type 'plist) 0))
+	     (case-fold-search t)
+	     (preview-name
+	      (cl-loop for (slot _value) on json by #'cddr
+		       when (string-match-p "preview" (symbol-name slot))
+		       return (substring (symbol-name slot) 1))))
+	(erase-buffer)
 	(call-process "exiftool" nil t nil
-		      "-json" "-a" "-G1" "-s"
-		      "-preview:all" file)
-	(goto-char (point-min))
-	(let* ((json (elt (json-parse-buffer :object-type 'plist) 0))
-	       (case-fold-search t)
-	       (preview-name
-		(cl-loop for (slot _value) on json by #'cddr
-			 when (string-match-p "preview" (symbol-name slot))
-			 return (substring (symbol-name slot) 1))))
-	  (erase-buffer)
-	  (call-process "exiftool" nil t nil
-			"-b" (concat "-" preview-name) file))))
-      (buffer-string))))
+		      "-b" (concat "-" preview-name) file))))
+    (buffer-string)))
 
 (defun image-triage--create-buffer (file)
   "If a buffer for FILE exists, return it.
@@ -635,65 +640,62 @@ Otherwise, create a new buffer."
 
 (defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast)
   (when (buffer-live-p buffer)
-    (let ((fast (expand-file-name "jpgpreview"
-				  (file-name-directory
-				   (find-library-name "image-triage.el")))))
-		
-      (cond
-       ;; If the file has disappeared in the meantime, just skip to
-       ;; the next.
-       ((not (file-exists-p file))
-	(funcall next))
-       ;; Fast utility distributed with `image-triage'.
-       ((and (not inhibit-fast)
-	     (file-exists-p fast))
-	(image-triage--fetch-thumbnail-from-exif file buffer next "thumb" fast))
-       ;; Slow version -- we first see what the thumbnail is called,
-       ;; and then we extract it.
-       (t
-	(with-current-buffer buffer
-	  (setq image-triage--last-process (current-time)))
-	(make-process
-	 :name "exiftool"
-	 :buffer (generate-new-buffer " *exiftool*")
-	 :command (list "exiftool" "-json" "-a" "-G1" "-s"
-			"-preview:all" file)
-	 :sentinel
-	 (lambda (proc _)
-	   (with-current-buffer (process-buffer proc)
-	     (let ((data nil))
-	       (goto-char (point-min))
-	       (unwind-protect
-		   (let ((json (elt (ignore-errors
-				      (json-parse-buffer :object-type 'plist))
-				    0))
-			 (case-fold-search t))
-		     ;; Hopefully the thumbnail is called something
-		     ;; like "thumbnail".
-		     (cl-loop for (slot value) on json by #'cddr
-			      do (cond
-				  ((string-match-p
-				    "thumbnail" (symbol-name slot))
-				   (push (list 'thumbnail
-					       (substring (symbol-name slot) 1)
-					       (image-triage--exif-bytes value))
-					 data))
-				  ((string-match-p
-				    "preview" (symbol-name slot))
-				   (push (list 'preview
-					       (substring (symbol-name slot) 1)
-					       (image-triage--exif-bytes value))
-					 data)))))
-		 (kill-buffer (current-buffer)))
-	       (when (buffer-live-p buffer)
-		 (when data
-		   (with-current-buffer buffer
-		     (setf (gethash file image-triage--data)
-			   (list 'exif data))))
-		 ;; We have the name of the thumbnail exif element, so
-		 ;; extract it.
-		 (image-triage--fetch-thumbnail-from-exif
-		  file buffer next (nth 1 (assq 'thumbnail data)))))))))))))
+    (cond
+     ;; If the file has disappeared in the meantime, just skip to
+     ;; the next.
+     ((not (file-exists-p file))
+      (funcall next))
+     ;; Fast utility distributed with `image-triage'.
+     ((and (not inhibit-fast)
+	   (file-exists-p (image-triage--jpgpreview)))
+      (image-triage--fetch-thumbnail-from-exif
+       file buffer next "thumb" (image-triage--jpgpreview)))
+     ;; Slow version -- we first see what the thumbnail is called,
+     ;; and then we extract it.
+     (t
+      (with-current-buffer buffer
+	(setq image-triage--last-process (current-time)))
+      (make-process
+       :name "exiftool"
+       :buffer (generate-new-buffer " *exiftool*")
+       :command (list "exiftool" "-json" "-a" "-G1" "-s"
+		      "-preview:all" file)
+       :sentinel
+       (lambda (proc _)
+	 (with-current-buffer (process-buffer proc)
+	   (let ((data nil))
+	     (goto-char (point-min))
+	     (unwind-protect
+		 (let ((json (elt (ignore-errors
+				    (json-parse-buffer :object-type 'plist))
+				  0))
+		       (case-fold-search t))
+		   ;; Hopefully the thumbnail is called something
+		   ;; like "thumbnail".
+		   (cl-loop for (slot value) on json by #'cddr
+			    do (cond
+				((string-match-p
+				  "thumbnail" (symbol-name slot))
+				 (push (list 'thumbnail
+					     (substring (symbol-name slot) 1)
+					     (image-triage--exif-bytes value))
+				       data))
+				((string-match-p
+				  "preview" (symbol-name slot))
+				 (push (list 'preview
+					     (substring (symbol-name slot) 1)
+					     (image-triage--exif-bytes value))
+				       data)))))
+	       (kill-buffer (current-buffer)))
+	     (when (buffer-live-p buffer)
+	       (when data
+		 (with-current-buffer buffer
+		   (setf (gethash file image-triage--data)
+			 (list 'exif data))))
+	       ;; We have the name of the thumbnail exif element, so
+	       ;; extract it.
+	       (image-triage--fetch-thumbnail-from-exif
+		file buffer next (nth 1 (assq 'thumbnail data))))))))))))
 
 (defun image-triage--fetch-thumbnail-from-exif (file buffer next
 						     thumbnail-name
