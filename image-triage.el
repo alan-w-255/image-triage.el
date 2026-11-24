@@ -677,8 +677,10 @@ Otherwise, create a new buffer."
 		      (unless (get-text-property (point) 'thumbnail)
 			(let ((elem (gethash file image-triage--data)))
 			  (if (plist-get elem 'thumbnail)
-			      (image-triage--insert-thumbnail
-			       (plist-get elem 'thumbnail))
+			      (progn
+				(image-triage--insert-thumbnail
+				 (plist-get elem 'thumbnail))
+				(forward-char -1))
 			    ;; If something else has fired off a new thumbnail
 			    ;; fetcher, then we stop.
 			    (when (= instance image-triage--thumbnail-instance)
