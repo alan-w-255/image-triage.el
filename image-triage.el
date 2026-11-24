@@ -27,8 +27,11 @@
 (defvar image-triage-file-name-regexps image-type-file-name-regexps
   "Alist of regexps for matching image file names.")
 
-(defvar image-triage-image-height 80
+(defvar image-triage-thumbnail-height 80
   "The height (in pixels) of image thumbnails.")
+
+(defvar image-triage-preview-height 800
+  "The height (in pixels) of image previews.")
 
 ;; Buffer-local variables used to store various things.
 (defvar image-triage--data)
@@ -40,6 +43,7 @@
 (defvar image-triage--precomputed-previews)
 
 (defvar image-triage--thumbnail-instance 0)
+(defvar image-triage--preview-instance 0)
 
 (defun image-triage-directory (directory)
   "View all images under DIRECTORY."
@@ -107,7 +111,7 @@
   ;; things properly like `vtable' does, but speed is important here
   ;; -- we want this mode to work for directories/trees with tens of
   ;; thousands of images.
-  (let* ((twidth (* image-triage-image-height 3))
+  (let* ((twidth (* image-triage-thumbnail-height 3))
 	 (swidth (string-pixel-width
 		  (propertize "9999G" 'face 'variable-pitch)))
 	 (mwidth (string-pixel-width
@@ -164,7 +168,7 @@
 		(nth 3 seps)
 		(propertize (file-name-nondirectory file) 'face 'variable-pitch)
 		(propertize "\n" 'line-height
-			    (+ image-triage-image-height 8)))))))
+			    (+ image-triage-thumbnail-height 8)))))))
 
 (defun image-triage--goto-file (file)
   (let ((point (point)))
@@ -467,8 +471,38 @@ things up.)"
 (defun image-triage--preload (from-file parent)
   ;; We want to preload images that come after the current viewed
   ;; image, so that hitting `n' is fast.
-  
-  )
+  (when (buffer-live-p parent)
+    (let* ((precomputed image-triage--precomputed-previews)
+	   ;; Get the names of the next ten images (that we haven't
+	   ;; already done).
+	   (next-files
+	    (with-current-buffer parent
+	      (save-excursion
+		(when (image-triage--goto-file from-file)
+		  (cl-loop repeat 10
+			   for file = (image-triage--file-name)
+			   while (not (eobp))
+			   unless (assoc file precomputed)
+			   collect file
+			   do (forward-line 1)))))))
+      (when next-files
+	(image-triage--preload-1 (current-buffer) next-files
+				 (cl-incf image-triage--preview-instance))))))
+
+(defun image-triage--preload-1 (buffer next-files instance)
+  (let (next)
+    (setq next
+	  (lambda ()
+	    (image-triage--fetch-thumbnail
+	     (car next-files) buffer
+	     (lambda ()
+	       (pop next-files)
+	       (when (and next-files
+			  ;; Stop fetching if someone else has started.
+			  (= instance image-triage--preview-instance))
+		 (funcall next)))
+	     nil t)))
+    (funcall next)))
 
 (defun image-triage--jpgpreview ()
   (expand-file-name
@@ -629,7 +663,7 @@ Otherwise, create a new buffer."
       (condition-case ()
 	  (insert-image
 	   (create-image data nil t
-			 :height image-triage-image-height
+			 :height image-triage-thumbnail-height
 			 :scale 1
 			 :ascent 100)
 	   (propertize " " 'image-triage--file
@@ -638,7 +672,8 @@ Otherwise, create a new buffer."
 		       'thumbnail t))
 	(error nil))))))
 
-(defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast)
+(defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast
+					   preview)
   (when (buffer-live-p buffer)
     (cond
      ;; If the file has disappeared in the meantime, just skip to
@@ -649,7 +684,8 @@ Otherwise, create a new buffer."
      ((and (not inhibit-fast)
 	   (file-exists-p (image-triage--jpgpreview)))
       (image-triage--fetch-thumbnail-from-exif
-       file buffer next "thumb" (image-triage--jpgpreview)))
+       file buffer next (if preview "preview" "thumb")
+       (image-triage--jpgpreview) preview))
      ;; Slow version -- we first see what the thumbnail is called,
      ;; and then we extract it.
      (t
@@ -670,36 +706,34 @@ Otherwise, create a new buffer."
 				    (json-parse-buffer :object-type 'plist))
 				  0))
 		       (case-fold-search t))
-		   ;; Hopefully the thumbnail is called something
-		   ;; like "thumbnail".
-		   (cl-loop for (slot value) on json by #'cddr
-			    do (cond
-				((string-match-p
-				  "thumbnail" (symbol-name slot))
-				 (push (list 'thumbnail
-					     (substring (symbol-name slot) 1)
-					     (image-triage--exif-bytes value))
-				       data))
-				((string-match-p
-				  "preview" (symbol-name slot))
-				 (push (list 'preview
-					     (substring (symbol-name slot) 1)
-					     (image-triage--exif-bytes value))
-				       data)))))
+		   ;; Hopefully the thumbnail is called something like
+		   ;; "thumbnail" and the preview something with
+		   ;; "preview".
+		   (setq data
+			 (cl-loop
+			  for (slot _value) on json by #'cddr
+			  append (cond
+				  ((string-match-p
+				    "thumbnail" (symbol-name slot))
+				   (list 'thumbnail
+					 (substring (symbol-name slot) 1)))
+				  ((string-match-p
+				    "preview" (symbol-name slot))
+				   (list 'preview
+					 (substring (symbol-name slot) 1)))))))
 	       (kill-buffer (current-buffer)))
 	     (when (buffer-live-p buffer)
-	       (when data
-		 (with-current-buffer buffer
-		   (setf (gethash file image-triage--data)
-			 (list 'exif data))))
 	       ;; We have the name of the thumbnail exif element, so
 	       ;; extract it.
 	       (image-triage--fetch-thumbnail-from-exif
-		file buffer next (nth 1 (assq 'thumbnail data))))))))))))
+		file buffer next
+		(plist-get (if preview 'preview 'thumbnail) data)
+		nil preview))))))))))
 
 (defun image-triage--fetch-thumbnail-from-exif (file buffer next
 						     thumbnail-name
-						     &optional fast)
+						     &optional fast
+						     preview)
   (with-current-buffer (generate-new-buffer " *exif thumbnail*")
     (set-buffer-multibyte nil)
     (with-current-buffer buffer
@@ -716,7 +750,9 @@ Otherwise, create a new buffer."
 		;; If we don't have a thumbnail, then extract from the
 		;; file itself.
 		(list "convert" "-resize"
-		      (format "x%d" image-triage-image-height)
+		      (format "x%d" (if preview
+					image-triage-preview-height
+				      image-triage-thumbnail-height))
 		      file "jpg:-")))
      :sentinel
      (lambda (proc _)
@@ -725,7 +761,7 @@ Otherwise, create a new buffer."
 	   ;; If we used the fast version, we may not have gotten
 	   ;; a thumbnail (because there wasn't one).  If so,
 	   ;; go back and do it that hard way.
-	   (image-triage--fetch-thumbnail file buffer next t)
+	   (image-triage--fetch-thumbnail file buffer next t preview)
 	 (let ((thumbnail
 		(with-current-buffer (process-buffer proc)
 		  (prog1
@@ -733,14 +769,23 @@ Otherwise, create a new buffer."
 		    (kill-buffer (current-buffer))))))
 	   (when (buffer-live-p buffer)
 	     (with-current-buffer buffer
-	       (save-excursion
-		 (let ((elem (gethash file image-triage--data)))
-		   (setf (gethash file image-triage--data)
-			 (plist-put elem 'thumbnail thumbnail)))
-		 (when (image-triage--goto-file file)
-		   (image-triage--insert-thumbnail
-		    thumbnail (not (zerop (process-exit-status proc)))))
-		 (funcall next))))))))))
+	       (if preview
+		   ;; We have a preview, so stash it in the correct
+		   ;; alist.
+		   (progn
+		     (push (cons file thumbnail)
+			   image-triage--precomputed-previews)
+		     (funcall next))
+		 ;; We have a thumbnail, so insert it in the list
+		 ;; buffer.
+		 (save-excursion
+		   (let ((elem (gethash file image-triage--data)))
+		     (setf (gethash file image-triage--data)
+			   (plist-put elem 'thumbnail thumbnail)))
+		   (when (image-triage--goto-file file)
+		     (image-triage--insert-thumbnail
+		      thumbnail (not (zerop (process-exit-status proc)))))
+		   (funcall next)))))))))))
 
 ;; "(Binary data 10499 bytes, use -b option to extract)"
 (defun image-triage--exif-bytes (string)
