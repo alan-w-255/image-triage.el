@@ -615,9 +615,20 @@ Otherwise, create a new buffer."
 (defun image-triage--insert-thumbnail (data &optional dummy)
   (let ((inhibit-read-only t))
     (beginning-of-line)
-    (if dummy
-	;; We have no data, but mark the line.
-	(put-text-property (point) (1+ (point)) 'thumbnail :error)
+    (cond
+     ;; We have no data, but mark the line.
+     (dummy
+      (put-text-property (point) (1+ (point)) 'thumbnail :error))
+     ((let ((disp (get-text-property (point) 'display)))
+	(and disp
+	     (consp disp)
+	     (eq (car disp) 'display)))
+      ;; Do nothing if there is already an image here.  This should
+      ;; never happen, so it's just a sanity check against two
+      ;; fetching threads going off at once.
+      )
+     ;; Protect against invalid image data.
+     (t
       (condition-case ()
 	  (insert-image
 	   (create-image data nil t
@@ -628,7 +639,7 @@ Otherwise, create a new buffer."
 		       (get-text-property
 			(point) 'image-triage--file)
 		       'thumbnail t))
-	(error nil)))))
+	(error nil))))))
 
 (defun image-triage--fetch-thumbnail (file buffer next &optional inhibit-fast)
   (when (buffer-live-p buffer)
