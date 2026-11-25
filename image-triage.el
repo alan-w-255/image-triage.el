@@ -458,8 +458,14 @@ If none are marked, delete the file under point."
   (if (eq image-triage--layout 'list)
       (and (zerop (forward-line -1))
 	   (image-triage--file-name))
-    (when-let ((match (text-property-search-backward 'image-triage--file)))
-      (prop-match-value match))))
+    (let ((value (get-text-property (point) 'image-triage--file)))
+      (while (and (not (bobp))
+		  (or (null (get-text-property (point) 'image-triage--file))
+		      (equal value (get-text-property
+				    (point) 'image-triage--file))))
+	(forward-char -1))
+      (and (not (equal value (get-text-property (point) 'image-triage--file)))
+	   (get-text-property (point) 'image-triage--file)))))
 
 (defun image-triage--move (direction)
   (let ((parent image-triage--parent-buffer)
