@@ -726,6 +726,8 @@ Otherwise, create a new buffer."
   "n" #'image-triage-display-next
   "p" #'image-triage-display-previous
   "g" #'image-triage-display-full
+  "TAB" #'image-triage-display-next
+  "<backtab>" #'image-triage-display-previous
   "SPC" #'image-triage-display-toggle-mark
   "m" #'image-triage-display-mark
   "u" #'image-triage-display-unmark)
