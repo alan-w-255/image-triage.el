@@ -27,6 +27,11 @@
 (defvar image-triage-file-name-regexps image-type-file-name-regexps
   "Alist of regexps for matching image file names.")
 
+(defvar image-triage-layout 'grid
+  "What layout to use when listing image files.
+`grid' will give you a grid layout, and `list' will give you a
+ more traditional dired-like layout.")
+
 (defvar image-triage-thumbnail-height 80
   "The height (in pixels) of image thumbnails in list mode.")
 
@@ -50,9 +55,13 @@
 (defvar image-triage--thumbnail-instance 0)
 (defvar image-triage--preview-instance 0)
 
-(defun image-triage-directory (directory &optional grid)
+(defun image-triage-directory (directory &optional override-layout)
   "View all images under DIRECTORY.
-If GRID (interactively, the prefix), display images in a grid."
+Which layout (grid or list) is used is determined by the
+`image-triage-layout' variable.
+
+If OVERRIDE-LAYOUT (interactively, the prefix), use the non-default
+layout."
   (interactive "DView directory: \nP")
   (let* ((regexp (mapconcat #'car image-triage-file-name-regexps "\\|"))
 	 (files
@@ -63,27 +72,35 @@ If GRID (interactively, the prefix), display images in a grid."
 			;; `case-fold-search', so we do it the hard
 			;; way.
 			(directory-files directory t)))))
-    (image-triage--setup directory files grid)
+    (image-triage--setup directory files override-layout)
     (setq-local image-triage--list-mode 'directory)))
 
-(defun image-triage-tree (directory &optional grid)
+(defun image-triage-tree (directory &optional override-layout)
   "View all images under DIRECTORY, recursively.
-If GRID (interactively, the prefix), display images in a grid."
+Which layout (grid or list) is used is determined by the
+`image-triage-layout' variable.
+
+If OVERRIDE-LAYOUT (interactively, the prefix), use the non-default
+layout."
   (interactive "DView all images under directory: \nP")
   (let ((files (let ((case-fold-search t))
 		 (directory-files-recursively
 		  (expand-file-name directory)
 		  (mapconcat #'car image-triage-file-name-regexps "\\|")))))
-    (image-triage--setup directory files grid)
+    (image-triage--setup directory files override-layout)
     (setq-local image-triage--list-mode 'tree)))
 
-(defun image-triage--setup (directory files grid)
+(defun image-triage--setup (directory files override-layout)
   (setq directory (expand-file-name directory))
   (switch-to-buffer (image-triage--create-buffer directory))
   (let ((inhibit-read-only t)
+	(layout image-triage-layout)
 	(current (and (eq major-mode 'image-triage-list-mode)
 		      (image-triage--file-name)))
 	(point (point)))
+    ;; Allow the user to flip between the two layouts.
+    (when override-layout
+      (setq layout (if (eq layout 'grid) 'list 'grid)))
     (erase-buffer)
     ;; Avoid erasing buffer-local variables if we're just doing a
     ;; refresh of the buffer.
@@ -91,7 +108,7 @@ If GRID (interactively, the prefix), display images in a grid."
       (image-triage-list-mode))
     (setq-local image-triage--file-name directory
 		image-triage--last-process nil
-		image-triage--layout (if grid 'grid 'list))
+		image-triage--layout layout)
     ;; We default to sorting by newest first.
     (unless image-triage--sort-mode
       (setq image-triage--sort-mode 'time))
@@ -106,7 +123,7 @@ If GRID (interactively, the prefix), display images in a grid."
 					   (file-attributes f1)))))
 	     ;; Alphabeticalish.
 	     (sort files #'string-version-lessp))))
-      (if grid
+      (if (eq layout 'grid)
 	  (image-triage--insert-grid sorted-files)
 	(image-triage--insert-list sorted-files)))
     ;; When refreshing, try to keep the same position.
@@ -185,6 +202,8 @@ If GRID (interactively, the prefix), display images in a grid."
 			    (+ image-triage-thumbnail-height 8)))))))
 
 (defun image-triage--insert-grid (files)
+  ;; In case we're switching between layouts, nix out the header line.
+  (setq header-line-format nil)
   (let* ((columns (truncate
 		  (1- (/ (frame-pixel-width) image-triage-thumbnail-width))))
 	;; Directories often contain a bunch of images of the same
@@ -1008,4 +1027,3 @@ Otherwise, create a new buffer."
 
 ;;; image-triage.el ends here
 ;; Save height in variable and use it
-;; Variable for default layout
