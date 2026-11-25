@@ -252,6 +252,8 @@ If GRID (interactively, the prefix), display images in a grid."
 (defvar-keymap image-triage-list-mode-map
   "RET" #'image-triage-display-image
   "SPC" #'image-triage-list-toggle-mark
+  "TAB" #'image-triage-list-display-next
+  "<backtab>" #'image-triage-list-display-previous
   "m" #'image-triage-list-mark
   "U" #'image-triage-list-unmark-all
   "u" #'image-triage-list-unmark
@@ -411,6 +413,51 @@ If none are marked, delete the file under point."
 	(cl-incf count)))
     (message "Unmarked %s file%s" count (if (= count 1) "" "s"))))
 
+(defun image-triage-list-display-next ()
+  "Go to the next image and display it."
+  (interactive)
+  (image-triage--list-display-move 'next))
+
+(defun image-triage-list-display-previous ()
+  "Go to the previous image and display it."
+  (interactive)
+  (image-triage--list-display-move 'previous))
+
+(defun image-triage--list-display-move (direction)
+  (let ((next (if (eq direction 'next) (image-triage--next-file)
+		(image-triage--previous-file)))
+	(parent (current-buffer))
+	(win (selected-window))
+	(help-echo (get-text-property (point) 'help-echo)))
+    (unless next
+      (user-error (if (eq direction 'next) "No next file"
+		    "No previous file")))
+    (when help-echo
+      (message "%s" help-echo))
+    (let ((file (image-triage--file-name)))
+      (unless (file-exists-p file)
+	(user-error "%s no longer exists"))
+      (pop-to-buffer (or (image-triage--display-window)
+			 (image-triage--create-buffer file))
+		     nil t)
+      (unless (eq major-mode 'image-triage-display-mode)
+	(image-triage-display-mode))
+      (setq-local image-triage--file-name file
+		  image-triage--parent-buffer parent)
+      (image-triage--display-image file)
+      (rename-buffer (generate-new-buffer-name
+		      (concat (file-name-nondirectory
+			       (directory-file-name file))
+			      " Triage")))
+      (select-window win))))
+
+(defun image-triage--display-window ()
+  "Return a buffer that displays an image that can be reused."
+  (cl-loop for buffer in (buffer-list (selected-frame))
+	   when (eq (buffer-local-value 'major-mode buffer)
+		    'image-triage-display-mode)
+	   return buffer))
+    
 (defun image-triage--current-files ()
   "Return the list of marked files, or if none, the file under point."
   (or image-triage--marked-files
@@ -444,13 +491,13 @@ If none are marked, delete the file under point."
   (unless file
     (user-error "No file under point"))
   (unless (file-exists-p file)
-    (user-error "File %s does not exist file"))
+    (user-error "File %s does not exist"))
   (let ((parent (current-buffer)))
     (switch-to-buffer (image-triage--create-buffer file))
-    (image-triage-display-mode)
+    (unless (eq major-mode 'image-triage-display-mode)
+      (image-triage-display-mode))
     (setq-local image-triage--file-name file
-		image-triage--parent-buffer parent
-		image-triage--precomputed-previews nil)
+		image-triage--parent-buffer parent)
     (image-triage--display-image file)))
 
 (defun image-triage-display-next ()
@@ -679,7 +726,8 @@ Otherwise, create a new buffer."
   :interactive nil
   (buffer-disable-undo)
   (setq cursor-type nil
-	truncate-lines t))
+	truncate-lines t
+	image-triage--precomputed-previews nil))
 
 (defun image-triage--window-update (_ _)
   ;; `window-end' isn't updated right away, apparently, so postpone
@@ -940,5 +988,4 @@ Otherwise, create a new buffer."
 
 ;;; image-triage.el ends here
 
-;; TAB to select next image and display in a different window
-;; Display details on tab
+;; `n' on displayed list doesn't change point
