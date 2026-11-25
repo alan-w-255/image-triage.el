@@ -157,7 +157,8 @@ If GRID (interactively, the prefix), display images in a grid."
 	   'face 'variable-pitch))
     (dolist (file files)
       (let ((atts (file-attributes file)))
-	(insert (propertize (nth 0 seps) 'image-triage--file file)
+	(insert (propertize " " 'image-triage--file file)
+		(nth 0 seps)
 		(propertize 
 		 (if (member file image-triage--marked-files)
 		     "*" " ")
@@ -796,10 +797,12 @@ Otherwise, create a new buffer."
 	      'thumbnail t
 	      'help-echo help-echo
 	      'face
-	      `(:box ( :line-width 1
-		       :color ,(if (member file image-triage--marked-files)
-				   "blue"
-				 (face-background 'default))))
+	      (if (eq image-triage--layout 'list)
+		  'default
+		`(:box ( :line-width 1
+			 :color ,(if (member file image-triage--marked-files)
+				     "blue"
+				   (face-background 'default)))))
 	      'display
 	      `(,(if (eq image-triage--layout 'list)
 		     (create-image data nil t
