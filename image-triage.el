@@ -197,7 +197,6 @@ If GRID (interactively, the prefix), display images in a grid."
 				     image-triage-thumbnail-width))
 			30))
 	(column 0))
-    (message "%s %s" line-height size)
     (dolist (file files)
       (insert (propertize
 	       "*" 'image-triage--file file
@@ -771,7 +770,11 @@ Otherwise, create a new buffer."
 	      " "
 	      'image-triage--file file
 	      'thumbnail t
-	      'face `(:box (:line-width 1 :color ,(face-background 'default)))
+	      'face
+	      `(:box ( :line-width 1
+		       :color ,(if (member file image-triage--marked-files)
+				   "blue"
+				 (face-background 'default))))
 	      'display
 	      `(,(if (eq image-triage--layout 'list)
 		     (create-image data nil t
@@ -908,3 +911,7 @@ Otherwise, create a new buffer."
 (provide 'image-triage)
 
 ;;; image-triage.el ends here
+
+;; TAB to select next image and display in a different window
+;; Display details on tab
+;; mouse-over details
