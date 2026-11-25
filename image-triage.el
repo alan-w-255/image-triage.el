@@ -634,6 +634,9 @@ things up.)"
     (image-triage--preload file image-triage--parent-buffer)))
 
 (defun image-triage--precomputed (file)
+  ;; Prune the length of the previews.
+  (when-let ((tail (nthcdr 20 image-triage--precomputed-previews)))
+    (setcdr tail nil))
   (cdr (assoc file image-triage--precomputed-previews)))
 
 (defun image-triage--preload (from-file parent)
