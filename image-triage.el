@@ -262,6 +262,7 @@ If GRID (interactively, the prefix), display images in a grid."
   "C" #'image-triage-list-copy
   "D" #'image-triage-list-delete
   "&" #'image-triage-list-start
+  "=" #'image-triage-list-details
   "s" #'image-triage-list-toggle-sort)
 
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
@@ -349,6 +350,15 @@ If none are marked, delete the file under point."
        (cl-incf done))
      files)
     (message "Deleted %s file%s" done (if (= done 1) "" "s"))))
+
+(defun image-triage-list-details (file)
+  "Show the details of the file under point."
+  (interactive (list (image-triage--file-name)) image-triage-list-mode)
+  (unless file
+    (user-error "No file under point"))
+  (save-excursion
+    (image-triage--goto-file file)
+    (message "%s" (get-text-property (point) 'help-echo))))
 
 (defun image-triage-list-start (files command)
   "Open a command with the marked files.
@@ -997,3 +1007,5 @@ Otherwise, create a new buffer."
 (provide 'image-triage)
 
 ;;; image-triage.el ends here
+;; Save height in variable and use it
+;; Variable for default layout
