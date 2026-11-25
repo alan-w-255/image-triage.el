@@ -622,8 +622,8 @@ things up.)"
 	     " " 'display
 	     (create-image
 	      (if idata idata file) nil idata
-	      :width (truncate (* (frame-pixel-width) 0.95))
-	      :max-height (truncate (* (frame-pixel-height) 0.9))
+	      :width (truncate (* (window-pixel-width) 0.95))
+	      :max-height (truncate (* (window-pixel-height) 0.95))
 	      :scale 1)))
     (goto-char (point-min))
     (image-triage--preload file image-triage--parent-buffer)))
