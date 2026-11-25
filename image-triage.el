@@ -250,7 +250,7 @@ layout."
     (or (when-let ((match
 		    (text-property-search-forward 'image-triage--file
 						  file #'equal)))
-	  (if (eq image-triage--layout 'line)
+	  (if (eq image-triage--layout 'list)
 	      (beginning-of-line)
 	    (goto-char (prop-match-beginning match)))
 	  t)
@@ -304,10 +304,11 @@ layout."
   "Reload the current list of images."
   (interactive nil image-triage-list-mode)
   (if (eq image-triage--list-mode 'directory)
-      (image-triage-directory image-triage--file-name
-			      (eq image-triage--layout 'grid))
+      (image-triage-directory
+       image-triage--file-name
+       (not (eq image-triage--layout image-triage-layout)))
     (image-triage-tree image-triage--file-name
-		       (eq image-triage--layout 'grid))))
+		       (not (eq image-triage--layout image-triage-layout)))))
 
 (defun image-triage-list-copy (files to-directory)
   "Copy the marked files somewhere.
