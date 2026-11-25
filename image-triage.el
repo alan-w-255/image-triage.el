@@ -742,9 +742,10 @@ Otherwise, create a new buffer."
 	  (beginning-of-line)
 	  ;; Do the displayed lines.
 	  (while (and (< (point) end)
-		      (not done))
-	    (check)
-	    (image-triage--next-file)
+		      (not done)
+		      (progn
+			(check)
+			(image-triage--next-file)))
 	    (cl-incf lines))
 	  ;; Do the next screen and a half.
 	  (setq lines (truncate (* lines 1.5)))
