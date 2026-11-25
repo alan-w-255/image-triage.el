@@ -51,6 +51,7 @@
 (defvar image-triage--list-mode)
 (defvar image-triage--precomputed-previews)
 (defvar image-triage--layout)
+(defvar image-triage--line-height)
 
 (defvar image-triage--thumbnail-instance 0)
 (defvar image-triage--preview-instance 0)
@@ -217,6 +218,8 @@ layout."
 				     image-triage-thumbnail-width))
 			30))
 	(column 0))
+    ;; Save this for later use, too.
+    (setq-local image-triage--line-height line-height)
     (dolist (file files)
       (insert (propertize
 	       "*" 'image-triage--file file
@@ -899,6 +902,7 @@ Otherwise, create a new buffer."
 				   :ascent 100)
 		   (create-image data nil t
 				 :width image-triage-thumbnail-width
+				 :max-height image-triage--line-height
 				 :scale 1
 				 :ascent 100
 				 :margin '(10 . 0))))))
@@ -1027,4 +1031,3 @@ Otherwise, create a new buffer."
 (provide 'image-triage)
 
 ;;; image-triage.el ends here
-;; Save height in variable and use it
