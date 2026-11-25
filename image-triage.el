@@ -533,9 +533,10 @@ If none are marked, delete the file under point."
 	   (get-text-property (point) 'image-triage--file)))))
 
 (defun image-triage--move (direction)
-  (let ((parent image-triage--parent-buffer)
-	(file image-triage--file-name)
-	next-file)
+  (let* ((parent image-triage--parent-buffer)
+	 (file image-triage--file-name)
+	 (window (get-buffer-window parent))
+	 next-file new-point)
     (unless (buffer-live-p parent)
       (user-error "The parent buffer has been killed"))
     (save-window-excursion
@@ -551,7 +552,11 @@ If none are marked, delete the file under point."
 	    (setq next-file (image-triage--file-name))))
 	(unless next-file
 	  (goto-char point)
-	  (user-error "No next file"))))
+	  (user-error "No next file"))
+	(setq new-point (point))))
+    (when window
+      (message "%s" (point))
+      (set-window-point window new-point))
     (image-triage--display-image next-file)
     ;; Update the buffer for the new file name.  When hitting `n' in a
     ;; view buffer, we don't want to create a whole bunch of buffers,
@@ -987,5 +992,3 @@ Otherwise, create a new buffer."
 (provide 'image-triage)
 
 ;;; image-triage.el ends here
-
-;; `n' on displayed list doesn't change point
