@@ -200,12 +200,29 @@ If GRID (interactively, the prefix), display images in a grid."
     (dolist (file files)
       (insert (propertize
 	       "*" 'image-triage--file file
+	       'help-echo (image-triage--file-details file)
 	       'display `(min-width ((,(+ image-triage-thumbnail-width 20))))))
       (if (= column columns)
 	  (progn
 	    (insert (propertize "\n" 'line-height line-height))
 	    (setq column 0))
 	(cl-incf column)))))
+
+(defun image-triage--file-details (file)
+  (let ((atts (file-attributes file)))
+    (format "%s (%s, %s)"
+	    (file-name-nondirectory file)
+	    (file-size-human-readable (file-attribute-size atts))
+	    (if (> (time-convert (file-attribute-modification-time atts)
+				 'integer)
+		   (- (time-convert nil 'integer)
+		      (* 60 60 24 300)))
+		(format-time-string
+		 "%b %d %H:%M"
+		 (file-attribute-modification-time atts))
+	      (format-time-string
+	       "%b %d %Y"
+	       (file-attribute-modification-time atts))))))
 
 (defun image-triage--goto-file (file)
   (let ((point (point)))
@@ -766,8 +783,8 @@ Otherwise, create a new buffer."
       ;; fetching threads going off at once.
       )
      (t
-      (let ((file (get-text-property
-		   (point) 'image-triage--file)))
+      (let ((file (get-text-property (point) 'image-triage--file))
+	    (help-echo (get-text-property (point) 'help-echo)))
 	(delete-region (point) (1+ (point)))
 	;; Protect against invalid image data.
 	(condition-case ()
@@ -776,6 +793,7 @@ Otherwise, create a new buffer."
 	      " "
 	      'image-triage--file file
 	      'thumbnail t
+	      'help-echo help-echo
 	      'face
 	      `(:box ( :line-width 1
 		       :color ,(if (member file image-triage--marked-files)
@@ -920,4 +938,3 @@ Otherwise, create a new buffer."
 
 ;; TAB to select next image and display in a different window
 ;; Display details on tab
-;; mouse-over details
