@@ -316,7 +316,7 @@ layout."
 (defun image-triage-list-copy (files to-directory)
   "Copy the marked files somewhere.
 If none are marked, copy the file under point."
-  (interactive (let ((files (image-triage--current-files)))
+  (interactive (let ((files (image-triage-marked-files)))
 		 (list files
 		       (cond
 			((length= files 0)
@@ -358,7 +358,7 @@ If none are marked, copy the file under point."
 (defun image-triage-list-delete (files)
   "Delete the marked files.
 If none are marked, delete the file under point."
-  (interactive (list (image-triage--current-files)) image-triage-list-mode)
+  (interactive (list (image-triage-marked-files)) image-triage-list-mode)
   (unless files
     (user-error "No file under point"))
   (let ((done 0))
@@ -386,7 +386,7 @@ If none are marked, delete the file under point."
 (defun image-triage-list-start (files command)
   "Open a command with the marked files.
 If none are marked, delete the file under point."
-  (interactive (list (image-triage--current-files)
+  (interactive (list (image-triage-marked-files)
 		     (read-shell-command "Shell command: "))
 	       image-triage-list-mode)
   (unless files
@@ -491,7 +491,7 @@ If none are marked, delete the file under point."
 		    'image-triage-display-mode)
 	   return buffer))
     
-(defun image-triage--current-files ()
+(defun image-triage-marked-files ()
   "Return the list of marked files, or if none, the file under point."
   (or image-triage--marked-files
       (when-let ((file (image-triage--file-name)))
