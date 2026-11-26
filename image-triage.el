@@ -3,7 +3,11 @@
 ;; Copyright (C) 2026 Free Software Foundation, Inc.
 
 ;; Author: Lars Magne Ingebrigtsen <larsi@gnus.org>
-;; Keywords: images
+;; Maintainer: Lars Magne Ingebrigtsen <larsi@gnus.org>
+;; Keywords: multimedia
+;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
+;; URL: https://github.com/larsmagne/image-triage.el
 
 ;; image-triage is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -17,29 +21,96 @@
 
 ;;; Commentary:
 
+;; image-triage is a package for quickly looking through large
+;; collections of images.  It requires ImageMagick's `convert' and
+;; `exiftool'.  In addition, the `jpgpreview' helper that's included in
+;; this package (compile it with "make" in the source directory) makes
+;; thumbnailing considerably faster.
+;;
+;; Start browsing with `M-x image-triage-directory' (a single
+;; directory) or `M-x image-triage-tree' (recursively).
+;;
+;; The package can be loaded with `use-package'.  When installed from a
+;; package archive, with `straight.el' or with `package-vc', the
+;; autoloads are generated automatically:
+;;
+;;   (use-package image-triage
+;;     :commands (image-triage-directory image-triage-tree)
+;;     :custom (image-triage-layout 'grid)
+;;     :bind (("C-c i" . image-triage-directory)
+;;            ("C-c I" . image-triage-tree)))
+;;
+;; When loading straight from a source directory, add the directory to
+;; the `load-path'; `:commands' (or `:bind') then defines the
+;; autoloads for the entry points:
+;;
+;;   (use-package image-triage
+;;     :load-path "~/src/image-triage.el/"
+;;     :commands (image-triage-directory image-triage-tree))
+;;
+;; If you didn't build the `jpgpreview' helper, or it lives elsewhere,
+;; point `image-triage-jpgpreview-program' at it, or run
+;; `M-x image-triage-compile-jpgpreview'.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'find-func)
 (require 'dired)
+(require 'text-property-search)
 
-(defvar image-triage-file-name-regexps image-type-file-name-regexps
-  "Alist of regexps for matching image file names.")
+(defgroup image-triage nil
+  "View and mark images quickly."
+  :group 'image
+  :prefix "image-triage-")
 
-(defvar image-triage-layout 'grid
+;;;###autoload
+(defcustom image-triage-file-name-regexps
+  ;; Don't just use the value of `image-type-file-name-regexps':
+  ;; `image' may not be loaded when this file's autoloads are read
+  ;; (it's only preloaded in builds that support GUI frames).
+  (and (boundp 'image-type-file-name-regexps)
+       image-type-file-name-regexps)
+  "Alist of regexps for matching image file names."
+  :group 'image-triage
+  :type '(alist :key-type regexp :value-type symbol))
+
+;;;###autoload
+(defcustom image-triage-layout 'grid
   "What layout to use when listing image files.
 `grid' will give you a grid layout, and `list' will give you a
- more traditional dired-like layout.")
+ more traditional dired-like layout."
+  :group 'image-triage
+  :type '(choice (const :tag "Grid" grid)
+		 (const :tag "List" list)))
 
-(defvar image-triage-thumbnail-height 80
-  "The height (in pixels) of image thumbnails in list mode.")
+;;;###autoload
+(defcustom image-triage-thumbnail-height 80
+  "The height (in pixels) of image thumbnails in list mode."
+  :group 'image-triage
+  :type 'natnum)
 
-(defvar image-triage-thumbnail-width 200
-  "The width (in pixels) of image thumbnails in grid mode.")
+;;;###autoload
+(defcustom image-triage-thumbnail-width 200
+  "The width (in pixels) of image thumbnails in grid mode."
+  :group 'image-triage
+  :type 'natnum)
 
-(defvar image-triage-preview-height 800
-  "The height (in pixels) of image previews.")
+;;;###autoload
+(defcustom image-triage-preview-height 800
+  "The height (in pixels) of image previews."
+  :group 'image-triage
+  :type 'natnum)
+
+;;;###autoload
+(defcustom image-triage-jpgpreview-program nil
+  "Program used to generate thumbnails and previews.
+If nil, use the `jpgpreview' binary that's shipped alongside this
+library, or, failing that, look for `jpgpreview' in the directories
+listed in the `exec-path' variable."
+  :group 'image-triage
+  :type '(choice (const :tag "Automatic" nil)
+		 (file :tag "Program")))
 
 ;; Buffer-local variables used to store various things.
 (defvar image-triage--data)
@@ -56,6 +127,7 @@
 (defvar image-triage--thumbnail-instance 0)
 (defvar image-triage--preview-instance 0)
 
+;;;###autoload
 (defun image-triage-directory (directory &optional override-layout)
   "View all images under DIRECTORY.
 Which layout (grid or list) is used is determined by the
@@ -76,6 +148,7 @@ layout."
     (image-triage--setup directory files override-layout)
     (setq-local image-triage--list-mode 'directory)))
 
+;;;###autoload
 (defun image-triage-tree (directory &optional override-layout)
   "View all images under DIRECTORY, recursively.
 Which layout (grid or list) is used is determined by the
@@ -250,9 +323,9 @@ layout."
 (defun image-triage--goto-file (file)
   (let ((point (point)))
     (goto-char (point-min))
-    (or (when-let ((match
-		    (text-property-search-forward 'image-triage--file
-						  file #'equal)))
+    (or (when-let* ((match
+		     (text-property-search-forward 'image-triage--file
+						   file #'equal)))
 	  (if (eq image-triage--layout 'list)
 	      (beginning-of-line)
 	    (goto-char (prop-match-beginning match)))
@@ -288,6 +361,7 @@ layout."
   "=" #'image-triage-list-details
   "s" #'image-triage-list-toggle-sort)
 
+;;;###autoload
 (define-derived-mode image-triage-list-mode special-mode "Image Triage"
   :interactive nil
   (buffer-disable-undo)
@@ -482,7 +556,7 @@ If none are marked, delete the file under point."
       (message "%s" help-echo))
     (let ((file (image-triage--file-name)))
       (unless (file-exists-p file)
-	(user-error "%s no longer exists"))
+	(user-error "%s no longer exists" file))
       (pop-to-buffer (or (image-triage--display-window)
 			 (image-triage--create-buffer file))
 		     nil t)
@@ -507,7 +581,7 @@ If none are marked, delete the file under point."
 (defun image-triage-marked-files ()
   "Return the list of marked files, or if none, the file under point."
   (or image-triage--marked-files
-      (when-let ((file (image-triage--file-name)))
+      (when-let* ((file (image-triage--file-name)))
 	(list file))))
 
 (defun image-triage-list-unmark (&optional silent)
@@ -537,7 +611,7 @@ If none are marked, delete the file under point."
   (unless file
     (user-error "No file under point"))
   (unless (file-exists-p file)
-    (user-error "File %s does not exist"))
+    (user-error "File %s does not exist" file))
   (let ((parent (current-buffer)))
     (switch-to-buffer (image-triage--create-buffer file))
     (unless (eq major-mode 'image-triage-display-mode)
@@ -560,8 +634,8 @@ If none are marked, delete the file under point."
   (if (eq image-triage--layout 'list)
       (and (forward-line 1)
 	   (image-triage--file-name))
-    (when-let ((match (text-property-search-forward 'image-triage--file
-						    nil nil t)))
+    (when-let* ((match (text-property-search-forward 'image-triage--file
+						     nil nil t)))
       (goto-char (prop-match-beginning match))
       (prop-match-value match))))
 
@@ -681,7 +755,7 @@ things up.)"
 
 (defun image-triage--precomputed (file)
   ;; Prune the length of the previews.
-  (when-let ((tail (nthcdr 20 image-triage--precomputed-previews)))
+  (when-let* ((tail (nthcdr 20 image-triage--precomputed-previews)))
     (setcdr tail nil))
   (cdr (assoc file image-triage--precomputed-previews)))
 
@@ -721,15 +795,48 @@ things up.)"
 	     nil t)))
     (funcall next)))
 
+(defun image-triage--library-directory ()
+  "Return the directory where this library is installed.
+Return nil if that can't be determined."
+  (ignore-errors
+    (file-name-directory (find-library-name "image-triage.el"))))
+
+;;;###autoload
+(defun image-triage-compile-jpgpreview ()
+  "Build the `jpgpreview' helper program.
+This makes thumbnailing considerably faster.  The binary is placed
+next to this library, and requires a C compiler (`cc')."
+  (interactive)
+  (let ((directory (or (image-triage--library-directory)
+		       (user-error
+			"Can't find the image-triage source directory"))))
+    (unless (executable-find "cc")
+      (user-error "No C compiler (`cc') found"))
+    (with-temp-buffer
+      (let ((default-directory directory))
+	(unless (zerop (call-process "cc" nil (current-buffer) nil
+				     "-O2" "-Wall" "-o" "jpgpreview"
+				     "jpgpreview.c"))
+	  (error "Could not build jpgpreview: %s"
+		 (string-trim (buffer-string))))))
+    (message "Built %s" (expand-file-name "jpgpreview" directory))))
+
 (defun image-triage--jpgpreview ()
-  (expand-file-name
-   "jpgpreview" (file-name-directory (find-library-name "image-triage.el"))))
+  "Return the `jpgpreview' program to use, or nil if there is none."
+  (or (and image-triage-jpgpreview-program
+	   (expand-file-name image-triage-jpgpreview-program))
+      (let ((installed (image-triage--library-directory)))
+	(cond ((and installed
+		    (file-executable-p
+		     (expand-file-name "jpgpreview" installed)))
+	       (expand-file-name "jpgpreview" installed))
+	      ((executable-find "jpgpreview"))))))
 
 (defun image-triage--preview (file)
   (with-temp-buffer
     (set-buffer-multibyte nil)
     (cond
-     ((file-exists-p (image-triage--jpgpreview))
+     ((image-triage--jpgpreview)
       (call-process (image-triage--jpgpreview) nil t nil "preview" file))
      (t
       (call-process "exiftool" nil t nil
@@ -778,6 +885,7 @@ Otherwise, create a new buffer."
   "m" #'image-triage-display-mark
   "u" #'image-triage-display-unmark)
 
+;;;###autoload
 (define-derived-mode image-triage-display-mode special-mode "Triage Display"
   :interactive nil
   (buffer-disable-undo)
@@ -822,14 +930,14 @@ Otherwise, create a new buffer."
 
 (defun image-triage--fill-thumbnails-1 (buffer next instance)
   ;; Only do something if the buffer is visible.
-  (when-let ((window (get-buffer-window buffer t)))
+  (when-let* ((window (get-buffer-window buffer t)))
     (with-current-buffer buffer
       (let ((start (window-start window))
 	    (end (window-end window))
 	    (lines 0)
 	    (done nil))
 	(cl-flet ((check ()
-		    (when-let ((file (image-triage--file-name)))
+		    (when-let* ((file (image-triage--file-name)))
 		      (unless (get-text-property (point) 'thumbnail)
 			(let ((elem (gethash file image-triage--data)))
 			  (if (plist-get elem 'thumbnail)
@@ -931,7 +1039,7 @@ Otherwise, create a new buffer."
       (funcall next))
      ;; Fast utility distributed with `image-triage'.
      ((and (not inhibit-fast)
-	   (file-exists-p (image-triage--jpgpreview)))
+	   (image-triage--jpgpreview))
       (image-triage--fetch-thumbnail-from-exif
        file buffer next (if preview "preview" "thumb")
        (image-triage--jpgpreview) preview))
