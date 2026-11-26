@@ -283,11 +283,15 @@ layout."
 	;; Directories often contain a bunch of images of the same
 	;; size.  So using the size of the first image in the
 	;; directory to guess at a reasonable image height seems, er,
-	;; reasonable.
-	(size (image-size (create-image (image-triage--preview (car files))
-					nil t :scale 1)
-			  t))
-	(line-height (+ (truncate (* (/ (cdr size) (float (car size)))
+	;; reasonable.  (But we may not be able to get at it, so fall
+	;; back to a 4:3 aspect ratio.)
+	(size (ignore-errors
+		(image-size
+		 (create-image (image-triage--preview (car files))
+			       nil t :scale 1)
+		 t)))
+	(line-height (+ (truncate (* (/ (or (cdr size) 3)
+					(float (or (car size) 4)))
 				     image-triage-thumbnail-width))
 			30))
 	(column 0))
@@ -867,6 +871,14 @@ FORCE (interactively, the prefix) is non-nil."
 	  ;; No preview -- downscale ourselves.
 	  (call-process "convert" nil t nil
 			"-resize" "800x" file "jpg:-")))))
+    ;; `jpgpreview' only knows about JPEGs with an embedded preview,
+    ;; and `exiftool' may not find one either (PNGs, screenshots,
+    ;; edited photos...), so the helper can come up empty.  Downscale
+    ;; ourselves in that case, because returning nothing would make
+    ;; `create-image' fail.
+    (when (zerop (buffer-size))
+      (ignore-errors
+	(call-process "convert" nil t nil "-resize" "800x" file "jpg:-")))
     (buffer-string)))
 
 (defun image-triage--create-buffer (file)
