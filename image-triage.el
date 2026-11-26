@@ -802,24 +802,35 @@ Return nil if that can't be determined."
     (file-name-directory (find-library-name "image-triage.el"))))
 
 ;;;###autoload
-(defun image-triage-compile-jpgpreview ()
+(defun image-triage-compile-jpgpreview (&optional force)
   "Build the `jpgpreview' helper program.
 This makes thumbnailing considerably faster.  The binary is placed
-next to this library, and requires a C compiler (`cc')."
-  (interactive)
-  (let ((directory (or (image-triage--library-directory)
-		       (user-error
-			"Can't find the image-triage source directory"))))
+next to this library, and requires a C compiler (`cc').
+
+If the binary is already up to date, don't rebuild it, unless
+FORCE (interactively, the prefix) is non-nil."
+  (interactive "P")
+  (let* ((directory (or (image-triage--library-directory)
+			(user-error
+			 "Can't find the image-triage source directory")))
+	 (binary (expand-file-name "jpgpreview" directory))
+	 (source (expand-file-name "jpgpreview.c" directory)))
+    (unless (file-exists-p source)
+      (user-error "No jpgpreview.c in %s" directory))
     (unless (executable-find "cc")
       (user-error "No C compiler (`cc') found"))
-    (with-temp-buffer
-      (let ((default-directory directory))
-	(unless (zerop (call-process "cc" nil (current-buffer) nil
-				     "-O2" "-Wall" "-o" "jpgpreview"
-				     "jpgpreview.c"))
-	  (error "Could not build jpgpreview: %s"
-		 (string-trim (buffer-string))))))
-    (message "Built %s" (expand-file-name "jpgpreview" directory))))
+    (if (and (not force)
+	     (file-exists-p binary)
+	     (not (file-newer-than-file-p source binary)))
+	(message "%s is up to date" binary)
+      (with-temp-buffer
+	(let ((default-directory directory))
+	  (unless (zerop (call-process "cc" nil (current-buffer) nil
+				       "-O2" "-Wall" "-o" "jpgpreview"
+				       "jpgpreview.c"))
+	    (error "Could not build jpgpreview: %s"
+		   (string-trim (buffer-string))))))
+      (message "Built %s" binary))))
 
 (defun image-triage--jpgpreview ()
   "Return the `jpgpreview' program to use, or nil if there is none."
